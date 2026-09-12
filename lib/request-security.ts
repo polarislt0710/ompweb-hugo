@@ -6,10 +6,34 @@ function canonicalOrigin(value: string): string | null {
   }
 }
 
+function forwardedProto(request: Request): string {
+  const forwarded = request.headers.get("x-forwarded-proto");
+  if (forwarded) {
+    const first = forwarded.split(",")[0].trim().toLowerCase();
+    if (first === "http" || first === "https") return first;
+  }
+  const visitor = request.headers.get("cf-visitor");
+  if (visitor) {
+    try {
+      const scheme = JSON.parse(visitor).scheme;
+      if (scheme === "http" || scheme === "https") return scheme;
+    } catch {
+      // ignore malformed cf-visitor
+    }
+  }
+  return new URL(request.url).protocol.replace(":", "");
+}
+
+/** Origin the browser used, even when Next sees an internal http://127.0.0.1 URL. */
+export function getExternalOrigin(request: Request): string | null {
+  const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
+  const proto = forwardedProto(request);
+  if (host) return canonicalOrigin(`${proto}://${host}`);
+  return canonicalOrigin(request.url);
+}
+
 function getRequestOrigin(request: Request): string | null {
-  const requestUrl = new URL(request.url);
-  const host = request.headers.get("host");
-  return host ? canonicalOrigin(`${requestUrl.protocol}//${host}`) : requestUrl.origin;
+  return getExternalOrigin(request);
 }
 
 /** Reject browser cross-site API requests while preserving non-browser clients. */

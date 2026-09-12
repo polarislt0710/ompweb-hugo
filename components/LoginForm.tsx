@@ -1,43 +1,22 @@
 "use client";
 
 import { LockKeyhole } from "lucide-react";
-import { FormEvent, useState } from "react";
+import { useEffect, useState } from "react";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useI18n } from "@/lib/i18n";
 
 export function LoginForm() {
   const { t } = useI18n();
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(false);
 
-  async function signIn(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSubmitting(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/web-auth/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
-      });
-      if (!response.ok) {
-        setError(t("loginForm.incorrect"));
-        return;
-      }
-      // Full reload so the new auth cookie is picked up by middleware
-      // and server components — SPA navigation alone may keep stale state.
-      window.location.replace("/");
-    } catch {
-      setError(t("loginForm.failed"));
-    } finally {
-      setSubmitting(false);
-    }
-  }
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setError(params.get("error") === "1");
+  }, []);
 
   return (
     <main style={{ flex: 1, display: "grid", placeItems: "center", padding: 20, background: "var(--bg)", position: "relative" }}>
-      <div style={{ position: "absolute", top: 16, right: 16 }}>
+      <div style={{ position: "absolute", top: 16, right: 16, zIndex: 400 }}>
         <LanguageSwitcher />
       </div>
       <section
@@ -49,14 +28,13 @@ export function LoginForm() {
         </div>
         <h1 id="login-title" className="display-serif" style={{ margin: 0, fontSize: 28, lineHeight: 1.1, color: "var(--text)" }}>{t("loginForm.title")}</h1>
         <p style={{ margin: "10px 0 24px", color: "var(--text-muted)", fontSize: 13, lineHeight: 1.5 }}>{t("loginForm.subtitle")}</p>
-        <form onSubmit={signIn} style={{ display: "grid", gap: 14 }}>
+        <form method="post" action="/api/web-auth/session" style={{ display: "grid", gap: 14 }}>
           <label htmlFor="web-password" style={{ display: "grid", gap: 6, color: "var(--text-muted)", fontSize: 12, fontWeight: 600 }}>
             {t("loginForm.password")}
             <input
               id="web-password"
+              name="password"
               type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
               autoComplete="current-password"
               autoFocus
               required
@@ -65,9 +43,9 @@ export function LoginForm() {
               style={{ width: "100%", padding: "9px 10px", border: `1px solid ${error ? "var(--status-error)" : "var(--border)"}`, borderRadius: "var(--radius-control)", background: "var(--bg)", color: "var(--text)", fontSize: 14, outline: "none", boxShadow: "none" }}
             />
           </label>
-          {error && <p id="password-error" role="alert" style={{ margin: 0, color: "var(--status-error)", fontSize: 12 }}>{error}</p>}
-          <button type="submit" disabled={submitting} style={{ minHeight: 36, border: 0, borderRadius: "var(--radius-control)", background: "var(--accent-strong)", color: "var(--on-accent)", fontWeight: 600, cursor: submitting ? "wait" : "pointer", opacity: submitting ? 0.7 : 1 }}>
-            {submitting ? t("loginForm.unlocking") : t("loginForm.unlock")}
+          {error && <p id="password-error" role="alert" style={{ margin: 0, color: "var(--status-error)", fontSize: 12 }}>{t("loginForm.incorrect")}</p>}
+          <button type="submit" style={{ minHeight: 36, border: 0, borderRadius: "var(--radius-control)", background: "var(--accent-strong)", color: "var(--on-accent)", fontWeight: 600, cursor: "pointer" }}>
+            {t("loginForm.unlock")}
           </button>
         </form>
       </section>

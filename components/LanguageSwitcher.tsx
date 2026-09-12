@@ -31,16 +31,25 @@ export function LanguageSwitcher() {
     if (!open) setActiveIndex(index);
   }, [index, open]);
 
-  // Focus the active item whenever the menu opens or the highlight moves.
+  // Keyboard users get the focused item; on phones, stealing focus closes the
+  // menu immediately (blur with a null relatedTarget).
   useEffect(() => {
-    if (open) itemRefs.current[activeIndex]?.focus();
-  }, [open, activeIndex]);
+    if (open && !isMobile) itemRefs.current[activeIndex]?.focus();
+  }, [open, activeIndex, isMobile]);
 
-  // Close on outside click / Escape is handled in onKeyDown below; also close
-  // when the trigger loses focus to something outside the component.
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const root = triggerRef.current?.parentElement;
+      if (root && !root.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
   const close = (returnFocus = true) => {
     setOpen(false);
-    if (returnFocus) triggerRef.current?.focus();
+    if (returnFocus && !isMobile) triggerRef.current?.focus();
   };
 
   const choose = (value: typeof locale) => {
@@ -93,13 +102,7 @@ export function LanguageSwitcher() {
   };
 
   return (
-    <div
-      style={{ position: "relative", flexShrink: 0 }}
-      onBlur={(e) => {
-        // Close when focus leaves the whole switcher.
-        if (!e.currentTarget.contains(e.relatedTarget as Node)) setOpen(false);
-      }}
-    >
+    <div style={{ position: "relative", flexShrink: 0, zIndex: open ? 400 : undefined }}>
       <button
         ref={triggerRef}
         type="button"
@@ -143,7 +146,7 @@ export function LanguageSwitcher() {
             position: "absolute",
             top: "calc(100% + 4px)",
             right: 0,
-            zIndex: 50,
+            zIndex: 400,
             minWidth: 120,
             margin: 0,
             padding: 4,
