@@ -24,9 +24,27 @@ function forwardedProto(request: Request): string {
   return new URL(request.url).protocol.replace(":", "");
 }
 
-function isLoopbackHost(host: string): boolean {
-  const hostname = host.replace(/^\[|\]$/g, "").split(":")[0]?.toLowerCase() ?? "";
-  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
+function hostnameOf(host: string): string {
+  try {
+    return new URL(`http://${host}`).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  } catch {
+    return host.split(":")[0]?.toLowerCase() ?? host;
+  }
+}
+
+function publicHostname(): string | null {
+  const configured = process.env.OMP_WEB_PUBLIC_HOST?.trim();
+  if (configured) return hostnameOf(configured);
+  // Daily-driver Cloudflare Tunnel hostname. Middleware may not see .env.local.
+  return "omp.bizobot.com";
+}
+
+function sameHostname(originA: string, originB: string): boolean {
+  try {
+    return new URL(originA).hostname.toLowerCase() === new URL(originB).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
 }
 
 function firstHeader(request: Request, name: string): string | null {
@@ -41,11 +59,7 @@ export function getExternalOrigin(request: Request): string | null {
   const proto = forwardedProto(request);
   const forwardedHost = firstHeader(request, "x-forwarded-host");
   const host = request.headers.get("host");
-  const publicHost = process.env.OMP_WEB_PUBLIC_HOST?.trim() || null;
-  const chosen = forwardedHost
-    || (host && !isLoopbackHost(host) ? host : null)
-    || publicHost
-    || host;
+  const chosen = forwardedHost || host;
   if (chosen) return canonicalOrigin(`${proto}://${chosen}`);
   return canonicalOrigin(request.url);
 }
@@ -60,8 +74,20 @@ export function isApiRequestOriginAllowed(request: Request): boolean {
   const fetchSite = request.headers.get("sec-fetch-site");
   if (!origin) return fetchSite !== "cross-site";
 
+  const originCanon = canonicalOrigin(origin);
+  if (!originCanon) return false;
+
   const requestOrigin = getRequestOrigin(request);
-  return requestOrigin !== null && canonicalOrigin(origin) === requestOrigin;
+  if (requestOrigin && originCanon === requestOrigin) return true;
+  // Cloudflare Tunnel terminates TLS: browser Origin is https, Next sees http.
+  if (requestOrigin && sameHostname(originCanon, requestOrigin)) return true;
+
+  const originHost = hostnameOf(new URL(originCanon).host);
+  const forwardedHost = firstHeader(request, "x-forwarded-host");
+  if (forwardedHost && hostnameOf(forwardedHost) === originHost) return true;
+  const publicHost = publicHostname();
+  if (publicHost && originHost === publicHost) return true;
+  return false;
 }
 
 export function shouldCheckApiRequestOrigin(request: Request): boolean {
