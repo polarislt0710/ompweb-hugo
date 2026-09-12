@@ -19,10 +19,11 @@ import { TabBar, type Tab } from "./TabBar";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { GitChangesPanel } from "./GitChangesPanel";
 import { FileViewer } from "./FileViewer";
+import { BrowserPane } from "./BrowserPane";
 import { useI18n } from "@/lib/i18n";
 import { getFileName } from "@/lib/file-paths";
 
-export type RightPanelView = "explorer" | "git" | "file";
+export type RightPanelView = "explorer" | "git" | "file" | "browser";
 
 interface Props {
   fileTabs: Tab[];
@@ -66,6 +67,7 @@ interface Props {
   onResetRightPanelWidth: () => void;
   onRightPanelResizeStart: (e: React.MouseEvent) => void;
   onRightPanelResizeKey: (e: React.KeyboardEvent) => void;
+  browserSessionId?: string | null;
 }
 
 // Memo boundary: AppShell re-renders on polls, timers, and session updates
@@ -115,6 +117,7 @@ export const RightPanel = memo(function RightPanel({
   onResetRightPanelWidth,
   onRightPanelResizeStart,
   onRightPanelResizeKey,
+  browserSessionId = null,
 }: Props) {
   const { t } = useI18n();
   const activeFileTab = fileTabs.find((tab) => tab.id === activeFileTabId) ?? null;
@@ -175,6 +178,8 @@ export const RightPanel = memo(function RightPanel({
               gitSelected={rightView === "git"}
               onSelectGit={() => onSelectView("git")}
               gitBadge={gitBadge}
+              browserSelected={rightView === "browser"}
+              onSelectBrowser={() => onSelectView("browser")}
             />
           </div>
           {rightView === "explorer" ? (
@@ -224,6 +229,8 @@ export const RightPanel = memo(function RightPanel({
               </button>
             </div>
             )
+          ) : rightView === "browser" ? (
+            <div style={{ display: "flex", alignItems: "center", padding: "0 8px", color: "var(--text-dim)", fontSize: 11 }}>localhost only</div>
           ) : rightView === "git" ? (
             explorerCwd && (
             <div style={{ display: "flex", alignItems: "center", flexShrink: 0, padding: "0 2px" }} role="toolbar" aria-label={t("tabBar.git")}>
@@ -393,6 +400,9 @@ export const RightPanel = memo(function RightPanel({
               <div style={{ color: "var(--text-dim)", fontSize: 11, lineHeight: 1.6, maxWidth: 260 }}>{t("sessionSidebar.selectProjectFirst")}</div>
             </div>
           )}
+        </div>
+        <div style={{ display: rightView === "browser" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
+          <BrowserPane sessionId={browserSessionId ?? null} />
         </div>
         {/* Keep open viewers mounted so switching tabs preserves scroll and preview state. */}
         <div style={{ display: rightView === "file" ? "block" : "none", flex: 1, minHeight: 0, overflow: "hidden" }}>

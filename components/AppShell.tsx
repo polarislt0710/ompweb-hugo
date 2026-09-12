@@ -13,8 +13,8 @@ import { type FileExplorerHandle } from "./FileExplorer";
 import type { RightPanelView } from "./RightPanel";
 import { BranchNavigator } from "./BranchNavigator";
 import { LanguageSwitcher } from "./LanguageSwitcher";
-import { Check, Folder, History, Menu, PanelLeft, Terminal, Wand2, Zap } from "lucide-react";
-import { ThemeSwitcher } from "./ThemeSwitcher";
+import { Check, Folder, Globe, History, Menu, PanelLeft, Terminal, Wand2, Zap } from "lucide-react";
+import { ThemeStudio } from "./ThemeStudio";
 import { translate, useI18n } from "@/lib/i18n";
 import { formatApiError } from "@/lib/i18n/api-error";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -870,7 +870,7 @@ export function AppShell() {
   const [fileTabs, setFileTabs] = useState<Tab[]>([]);
   const [activeFileTabId, setActiveFileTabId] = useState<string | null>(null);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
-  const [rightView, setRightView] = useState<"explorer" | "git" | "file">("explorer");
+  const [rightView, setRightView] = useState<RightPanelView>("explorer");
   // User-chosen pixel width (null = fluid 42% default), persisted.
   const [rightPanelWidth, setRightPanelWidth] = useState<number | null>(null);
   const [rightPanelResizing, setRightPanelResizing] = useState(false);
@@ -1569,7 +1569,7 @@ export function AppShell() {
             >
               {sidebarOpen ? <PanelLeft size={16} strokeWidth={1.8} aria-hidden="true" /> : <Menu size={16} strokeWidth={1.8} aria-hidden="true" />}
             </button>
-            <ThemeSwitcher />
+            <ThemeStudio />
             <LanguageSwitcher />
             {showChat && (
               <>
@@ -1753,7 +1753,7 @@ export function AppShell() {
               alignItems: "center",
               gap: 6,
               height: "100%",
-              paddingRight: isMobile ? (rightPanelOpen ? 0 : 44) : rightPanelOpen ? 8 : 44,
+              paddingRight: isMobile ? (rightPanelOpen ? 0 : 88) : rightPanelOpen ? 8 : 72,
               flexShrink: 0,
             }}
           >
@@ -1974,11 +1974,37 @@ export function AppShell() {
         onResetRightPanelWidth={resetRightPanelWidth}
         onRightPanelResizeStart={handleRightPanelResizeStart}
         onRightPanelResizeKey={handleRightPanelResizeKey}
+        browserSessionId={selectedSession?.id ?? null}
       />
       )}
 
     </div>
     {!settingsTab && (
+      <>
+      <button
+      onClick={() => {
+        if (rightPanelOpen && rightView === "browser") {
+          setRightPanelOpen(false);
+          return;
+        }
+        setRightView("browser");
+        setRightPanelOpen(true);
+      }}
+      title={t("browserPane.localBrowser")}
+      aria-label={t("browserPane.localBrowser")}
+      style={{
+        position: "fixed", top: 0, right: isMobile ? 44 : 36, zIndex: 300,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        width: isMobile ? 44 : 36, height: isMobile ? 44 : 36, padding: 0,
+        background: "var(--bg-panel)", border: "none", borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
+        color: rightPanelOpen && rightView === "browser" ? "var(--text)" : "var(--text-muted)",
+        cursor: "pointer", transition: "color var(--dur-fast) var(--ease-out-warm)",
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.color = rightPanelOpen && rightView === "browser" ? "var(--text)" : "var(--text-muted)"; }}
+    >
+      <Globe size={16} strokeWidth={1.8} aria-hidden="true" />
+    </button>
       <button
       onClick={() => setRightPanelOpen((v) => !v)}
       title={rightPanelOpen ? t("appShell.hideFilePanel") : t("appShell.showFilePanel")}
@@ -1998,6 +2024,7 @@ export function AppShell() {
         <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
       </svg>
     </button>
+      </>
     )}
     <AppUpdateDialog open={appUpdateDialogOpen} update={appUpdate} phase={appUpdatePhase} visibleStage={appUpdateVisibleStage} error={appUpdateError} onProceed={() => void proceedWithAppUpdate()} onNotNow={dismissAppUpdate} />
     {archiveBrowserOpen && (

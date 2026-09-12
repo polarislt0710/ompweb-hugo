@@ -16,6 +16,13 @@ export const IMAGE_EXT_TO_MIME: Record<string, string> = {
   avif: "image/avif",
 };
 
+export const VIDEO_EXT_TO_MIME: Record<string, string> = {
+  mp4: "video/mp4",
+  m4v: "video/mp4",
+  mov: "video/quicktime",
+  ogv: "video/ogg",
+};
+
 export const AUDIO_EXT_TO_MIME: Record<string, string> = {
   mp3: "audio/mpeg",
   wav: "audio/wav",
@@ -48,6 +55,10 @@ export function getImageMime(filePath: string): string | null {
 
 export function getAudioMime(filePath: string): string | null {
   return AUDIO_EXT_TO_MIME[getFileExt(filePath)] ?? null;
+}
+
+export function getVideoMime(filePath: string): string | null {
+  return VIDEO_EXT_TO_MIME[getFileExt(filePath)] ?? null;
 }
 
 export function getDocumentMime(filePath: string): string | null {
@@ -83,6 +94,10 @@ export function isImagePath(filePath: string): boolean {
 
 export function isAudioPath(filePath: string): boolean {
   return getAudioMime(filePath) !== null;
+}
+
+export function isVideoPath(filePath: string): boolean {
+  return getVideoMime(filePath) !== null;
 }
 
 export function isDocumentPreviewPath(filePath: string): boolean {

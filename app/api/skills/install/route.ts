@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { runNpx } from "@/lib/npx";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
+import { parseSkillsAddPackage, skillsAddArgs } from "@/lib/skills-package";
 
 export const dynamic = "force-dynamic";
 
@@ -11,11 +12,10 @@ export async function POST(req: Request) {
   try {
     const { package: pkg, scope, cwd } = await req.json() as { package?: string; scope?: string; cwd?: string };
     if (!pkg?.trim()) return NextResponse.json({ error: "package required", code: "package_required" }, { status: 400 });
-    // npm package-name grammar: scope-optional, URL-safe segments. Rejecting
-    // leading dashes/`-` prefixes stops a value like `--force` from being
-    // interpreted as npx/CLI options instead of a package name.
-    const name = pkg.trim();
-    if (name.startsWith("-") || !/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/i.test(name)) {
+    // skills.sh sources are owner/repo[@skill], not npm names. Still reject
+    // leading dashes so `--force` cannot be passed through as a package.
+    const parsed = parseSkillsAddPackage(pkg);
+    if (!parsed) {
       return NextResponse.json({ error: "Invalid package name", code: "package_invalid" }, { status: 400 });
     }
     const isGlobal = scope !== "project";
@@ -29,8 +29,7 @@ export async function POST(req: Request) {
     // The skills.sh CLI has no omp agent entry; "universal" installs into the
     // ecosystem-standard ~/.agents/skills (global) / <cwd>/.agents/skills
     // (project), both of which omp discovers via its agent-dirs provider.
-    const args = ["skills", "add", name, "-y", "--agent", "universal"];
-    if (isGlobal) args.push("-g");
+    const args = skillsAddArgs(parsed, { global: isGlobal });
 
     const { stdout, stderr } = await runNpx(args, {
       timeout: 60000,

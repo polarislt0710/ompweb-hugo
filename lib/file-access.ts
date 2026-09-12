@@ -1,4 +1,5 @@
 import { realpathSync } from "fs";
+import os from "os";
 import path from "path";
 import { isWindowsAbsolutePath } from "./paths";
 import { listAllSessions } from "./session-reader";
@@ -82,4 +83,19 @@ export function isExistingPathWithinRoots(target: string, roots: Set<string>): b
 
 export function isExistingFilePathAllowed(target: string, allowedRoots: Set<string>): boolean {
   return isExistingPathWithinRoots(target, allowedRoots);
+}
+
+const OMP_IMAGE_TEMP = /^omp-image-[a-f0-9]+\.(webp|png|jpe?g|gif)$/i;
+
+/** Images from omp generate_image land in os.tmpdir(), outside session cwd. */
+export function isGeneratedImageTempPath(target: string): boolean {
+  const base = path.basename(target);
+  if (!OMP_IMAGE_TEMP.test(base)) return false;
+  try {
+    const realFile = stripLongPathPrefix(realpathSync(target));
+    const tmp = stripLongPathPrefix(realpathSync(os.tmpdir()));
+    return isPathWithinRoots(realFile, new Set([tmp]));
+  } catch {
+    return false;
+  }
 }

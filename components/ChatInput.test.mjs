@@ -93,6 +93,22 @@ test("renders goal, planning, and advisor indicators at the composer", () => {
   assert.match(html, /aria-label="(More actions|chatInput\.plusMenu)"/);
 });
 
+test("renders Plan, Flow, Grill, Ask, and the style picker next to thinking", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(ChatInput, {
+      onSend() {},
+      onAbort() {},
+      isStreaming: false,
+    }),
+  );
+
+  assert.match(html, /aria-label="(Plan|chatInput\.planLabel)"/);
+  assert.match(html, /aria-label="(Flow|chatInput\.flowLabel)"/);
+  assert.match(html, /aria-label="(Grill|chatInput\.grillLabel)"/);
+  assert.match(html, /aria-label="(Ask|chatInput\.askMattLabel)"/);
+  assert.match(html, /aria-label="(Style: Default|風格: 日常|chatInput\.styleLabel)/);
+});
+
 test("renders the compact toolbar action", () => {
   const html = renderToStaticMarkup(
     React.createElement(ChatInput, {

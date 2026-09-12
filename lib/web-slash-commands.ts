@@ -28,6 +28,26 @@ const GOAL_PROMPT = (args: string) =>
 const PLAN_PROMPT = (args: string) =>
   `Create a plan for this task before doing anything else:\n\n${args}\n\nThink it through step by step, list concrete steps, and state what you will verify when done.`;
 
+const FLOW_PROMPT = (args: string) =>
+  args
+    ? `Follow the \`flow\` skill (Matt Pocock idea→ship). This is the automated pipeline: grill → to-spec → to-tickets → implement. Ask one question at a time until shared understanding. Then, without waiting for the user to type those slash commands, write the spec, split tickets, and implement. Pause only for decisions during grill, and one short checkpoint after spec/tickets before coding. Tiny one-file fixes may skip spec/tickets; say why in one line. Look up facts yourself. If this is a real repo, grill with CONTEXT.md / ADRs.\n\nThe idea / task:\n\n${args}`
+    : `Follow the \`flow\` skill (Matt Pocock idea→ship). This is the automated pipeline: grill → to-spec → to-tickets → implement. Ask one question at a time until shared understanding. Then, without waiting for the user to type those slash commands, write the spec, split tickets, and implement. Pause only for decisions during grill, and one short checkpoint after spec/tickets before coding. Tiny one-file fixes may skip spec/tickets; say why in one line. Look up facts yourself. If this is a real repo, grill with CONTEXT.md / ADRs.\n\nContinue from the current conversation. If there is no idea yet, ask what they want to shape.`;
+
+const GRILL_PROMPT = (args: string) =>
+  args
+    ? `Run a grilling session only. Ask one question at a time, with a recommended answer. Look up facts yourself; only decisions go to the user. Do not write a spec, tickets, or code until they turn on Flow or ask you to.\n\nThe idea / task:\n\n${args}`
+    : `Run a grilling session only. Ask one question at a time, with a recommended answer. Look up facts yourself; only decisions go to the user. Do not write a spec, tickets, or code until they turn on Flow or ask you to.\n\nContinue from the current conversation. If there is no idea yet, ask what they want to shape.`;
+
+const ASK_MATT_PROMPT = (args: string) =>
+  args
+    ? `Follow the ask-matt skill. Pick the smallest path. If this is a build, recommend Flow (grill → spec → tickets → implement).\n\nSituation:\n\n${args}`
+    : `Follow the ask-matt skill. Pick the smallest path. If this is a build, recommend Flow (grill → spec → tickets → implement).\n\nUse the current conversation. If it is unclear what they want, ask one question.`;
+
+const WAIT_WHAT_PROMPT = (args: string) =>
+  args
+    ? `Stop. The last assistant message did not land. Re-pitch it: open with the point in one sentence, then give the missing context in 3-5 short bullets. Use terms from CONTEXT.md if that file exists. Traditional Chinese (Taiwan) unless the user wrote English. Gloss jargon in one line the first time it appears.\n\nThe user is stuck on: ${args}`
+    : `Stop. The last assistant message did not land. Re-pitch it: open with the point in one sentence, then give the missing context in 3-5 short bullets. Use terms from CONTEXT.md if that file exists. Traditional Chinese (Taiwan) unless the user wrote English. Gloss jargon in one line the first time it appears.`;
+
 const REVIEW_PROMPT = (args: string) =>
   args
     ? `Review ${args} for bugs, security issues, and opportunities to simplify. Summarize what you find, then fix anything clearly wrong.`
@@ -79,6 +99,34 @@ export const WEB_SLASH_COMMANDS: readonly WebSlashCommandDef[] = [
     argumentHintKey: "chatInput.cmdPlanArg",
     requiresArgs: true,
     buildPrompt: PLAN_PROMPT,
+  },
+  {
+    name: "flow",
+    descriptionKey: "chatInput.cmdFlow",
+    argumentHintKey: "chatInput.cmdFlowArg",
+    requiresArgs: false,
+    buildPrompt: FLOW_PROMPT,
+  },
+  {
+    name: "wait-what",
+    descriptionKey: "chatInput.cmdWaitWhat",
+    argumentHintKey: "chatInput.cmdWaitWhatArg",
+    requiresArgs: false,
+    buildPrompt: WAIT_WHAT_PROMPT,
+  },
+  {
+    name: "grill",
+    descriptionKey: "chatInput.cmdGrill",
+    argumentHintKey: "chatInput.cmdGrillArg",
+    requiresArgs: false,
+    buildPrompt: GRILL_PROMPT,
+  },
+  {
+    name: "ask-matt",
+    descriptionKey: "chatInput.cmdAskMatt",
+    argumentHintKey: "chatInput.cmdAskMattArg",
+    requiresArgs: false,
+    buildPrompt: ASK_MATT_PROMPT,
   },
   {
     name: "review",

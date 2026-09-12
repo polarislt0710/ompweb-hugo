@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronRight, Gauge } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { formatUsageReset, usageTone, useProviderUsage } from "./AppShell-provider-usage";
@@ -66,15 +66,16 @@ export function ProviderUsageBar() {
   const { snapshot, loading, error } = useProviderUsage("", 5 * 60_000);
   const reports = snapshot?.reports ?? [];
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
+  // SSR and the first client paint must match. Read the stored expand/collapse
+  // choice after mount — localStorage in useState() is what tripped hydration.
+  const [collapsed, setCollapsed] = useState(true);
+  useEffect(() => {
     try {
-      // No stored choice yet → start hidden; an explicit expand persists.
-      return window.localStorage.getItem(COLLAPSED_STORAGE_KEY) !== "false";
+      setCollapsed(window.localStorage.getItem(COLLAPSED_STORAGE_KEY) !== "false");
     } catch {
-      return true;
+      // Private mode: stay collapsed.
     }
-  });
+  }, []);
 
   let worst: { percent: number; window: string } | null = null;
   for (const report of reports) {
@@ -156,6 +157,7 @@ export function ProviderUsageBar() {
       </button>
       {!collapsed && reports.map((report, index) => {
         const account = report.accountLabel ?? t("appShell.account", { number: report.accountIndex ?? index + 1 });
+        const rowLabel = report.meterLabel ? `${account} ${report.meterLabel}` : account;
         const key = `${report.provider}:${account}:${report.modelId ?? "all"}:${index}`;
         const best = worstWindow(report);
         const expanded = expandedKey === key;
@@ -167,7 +169,7 @@ export function ProviderUsageBar() {
               type="button"
               onClick={() => setExpandedKey((prev) => (prev === key ? null : key))}
               aria-expanded={report.noLimits ? undefined : expanded}
-              title={account}
+              title={rowLabel}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -199,7 +201,7 @@ export function ProviderUsageBar() {
                 {report.provider}
               </span>
               <span style={{ fontSize: 11, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
-                {account}
+                {rowLabel}
               </span>
               {report.noLimits ? (
                 <span style={{ fontSize: 10, color: "var(--text-dim)", flexShrink: 0 }}>∞</span>

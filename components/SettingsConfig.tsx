@@ -1116,17 +1116,23 @@ export function SettingsConfig({ activeTab, toolCallsDefaultCollapsed, onToolCal
               </div>
             )}
 
-            {/* SKILLS SUB-PANEL CONTRACT MATCH */}
-            {cwd && currentTab === "skills" && (
-              <div role="tabpanel" id="settings-panel-skills" aria-labelledby="settings-tab-skills" className="settings-panel-inner" style={{ display: currentTab === "skills" ? "flex" : "none", width: "100%", maxWidth: 940, minHeight: isMobile ? undefined : 600, flexDirection: "column", padding: isMobile ? "16px 14px 32px" : "32px 24px 64px" }}>
-                <SkillsConfig embedded cwd={cwd} onClose={onClose} />
+            {currentTab === "skills" && (
+              <div role="tabpanel" id="settings-panel-skills" aria-labelledby="settings-tab-skills" className="settings-panel-inner" style={{ display: "flex", width: "100%", maxWidth: 940, minHeight: isMobile ? undefined : 600, flexDirection: "column", padding: isMobile ? "16px 14px 32px" : "32px 24px 64px", gap: 16 }}>
+                <div style={{ marginBottom: 4 }}>
+                  <h2 className="display-serif" style={{ fontSize: 22, fontWeight: 600, margin: 0, color: "var(--text)", letterSpacing: "-0.01em" }}>{t("settingsConfig.skillsTitle")}</h2>
+                  <p className="settings-content-subtitle" style={{ margin: "4px 0 16px", fontSize: 13, color: "var(--text-muted)", lineHeight: 1.45 }}>{t("settingsConfig.skillsDesc")}</p>
+                </div>
+                {cwd ? <SkillsConfig embedded cwd={cwd} onClose={onClose} /> : <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>{t("settingsConfig.selectWorkspaceForSkills")}</p>}
               </div>
             )}
 
-            {/* PLUGINS SUB-PANEL CONTRACT MATCH */}
-            {cwd && currentTab === "plugins" && (
-              <div role="tabpanel" id="settings-panel-plugins" aria-labelledby="settings-tab-plugins" className="settings-panel-inner" style={{ display: currentTab === "plugins" ? "flex" : "none", width: "100%", maxWidth: 940, minHeight: isMobile ? undefined : 600, flexDirection: "column", padding: isMobile ? "16px 14px 32px" : "32px 24px 64px" }}>
-                <PluginsConfig embedded cwd={cwd} sessionId={sessionId} onClose={onClose} onReloaded={onPluginsReloaded} />
+            {currentTab === "plugins" && (
+              <div role="tabpanel" id="settings-panel-plugins" aria-labelledby="settings-tab-plugins" className="settings-panel-inner" style={{ display: "flex", width: "100%", maxWidth: 940, minHeight: isMobile ? undefined : 600, flexDirection: "column", padding: isMobile ? "16px 14px 32px" : "32px 24px 64px", gap: 16 }}>
+                <div style={{ marginBottom: 4 }}>
+                  <h2 className="display-serif" style={{ fontSize: 22, fontWeight: 600, margin: 0, color: "var(--text)", letterSpacing: "-0.01em" }}>{t("settingsConfig.pluginsTitle")}</h2>
+                  <p className="settings-content-subtitle" style={{ margin: "4px 0 16px", fontSize: 13, color: "var(--text-muted)", lineHeight: 1.45 }}>{t("settingsConfig.pluginsDesc")}</p>
+                </div>
+                {cwd ? <PluginsConfig embedded cwd={cwd} sessionId={sessionId} onClose={onClose} onReloaded={onPluginsReloaded} /> : <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12 }}>{t("settingsConfig.selectWorkspaceForPlugins")}</p>}
               </div>
             )}
 

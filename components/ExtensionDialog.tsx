@@ -4,10 +4,11 @@ import { useEffect, useState } from "react";
 import type { ExtensionUiRequest } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 import { useModalDialog } from "@/hooks/useModalDialog";
+import { AskGrillCard } from "./AskGrillCard";
 
 export type ExtensionDialogRequest = Extract<
   ExtensionUiRequest,
-  { method: "select" | "confirm" | "input" | "editor" }
+  { method: "select" | "confirm" | "input" | "editor" | "ask" }
 >;
 
 export type ExtensionDialogResponse =
@@ -43,6 +44,16 @@ export function ExtensionDialog({
     setValue(request.method === "editor" ? request.prefill ?? "" : "");
     setSelectedOption(null);
   }, [request]);
+
+  if (request.method === "ask") {
+    return (
+      <AskGrillCard
+        request={request}
+        onRespond={onRespond}
+        attached={attached}
+      />
+    );
+  }
 
   const cancel = () => onRespond(request, { cancelled: true });
 

@@ -68,6 +68,7 @@
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
+    "tldraw": "^5.4.2",
     "undici": "8.10.1",
     "yaml": "^2"
   },

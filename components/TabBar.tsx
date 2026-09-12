@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Folder, GitBranch, X } from "lucide-react";
+import { Folder, GitBranch, Globe, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { getFileIcon } from "./FileIcons";
 
@@ -27,9 +27,11 @@ interface Props {
   onSelectGit?: () => void;
   /** Changed-file count badge on the Git tab. */
   gitBadge?: number;
+  browserSelected?: boolean;
+  onSelectBrowser?: () => void;
 }
 
-export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, explorerSelected = false, onSelectExplorer, explorerBadge = 0, gitSelected = false, onSelectGit, gitBadge = 0 }: Props) {
+export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, explorerSelected = false, onSelectExplorer, explorerBadge = 0, gitSelected = false, onSelectGit, gitBadge = 0, browserSelected = false, onSelectBrowser }: Props) {
   const { t } = useI18n();
   const [hoveredClose, setHoveredClose] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -215,6 +217,44 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, explorerSel
               {gitBadge > 99 ? "99+" : gitBadge}
             </span>
           )}
+        </div>
+      )}
+      {onSelectBrowser && (
+        <div
+          data-tab-id="browser"
+          className="tabbar-tab ui-focus-ring"
+          onClick={onSelectBrowser}
+          role="tab"
+          tabIndex={browserSelected ? 0 : -1}
+          aria-selected={browserSelected}
+          aria-label={t("browserPane.localBrowser")}
+          title={t("browserPane.localBrowser")}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelectBrowser(); }
+          }}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            height: 36,
+            paddingLeft: 12,
+            paddingRight: 10,
+            borderRight: "1px solid var(--border)",
+            background: browserSelected ? "var(--bg)" : "var(--bg-panel)",
+            cursor: "pointer",
+            fontSize: 12,
+            color: browserSelected ? "var(--text)" : "var(--text-muted)",
+            whiteSpace: "nowrap",
+            flexShrink: 0,
+            userSelect: "none",
+            position: "relative",
+          }}
+        >
+          {browserSelected && (
+            <span aria-hidden="true" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 2, background: "var(--accent)" }} />
+          )}
+          <Globe size={13} strokeWidth={2} aria-hidden="true" style={{ color: browserSelected ? "var(--accent)" : undefined }} />
+          <span style={{ fontWeight: browserSelected ? 500 : 400 }}>{t("browserPane.tab")}</span>
         </div>
       )}
       {tabs.map((tab) => {

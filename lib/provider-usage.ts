@@ -62,6 +62,36 @@ function accountLabel(metadata: Record<string, unknown> | undefined): string | u
   return nonEmptyString(metadata?.email) ?? nonEmptyString(metadata?.accountId);
 }
 
+/** Keep 4 letters of the local part (2 extra vs omp --redact) so two accounts are not both `hu*`. */
+export function redactAccountLabel(label: string): string {
+  const trimmed = label.trim();
+  if (!trimmed) return trimmed;
+  const local = trimmed.includes("@") ? trimmed.slice(0, trimmed.indexOf("@")) : trimmed;
+  const chars = local.replace(/[^A-Za-z0-9]/g, "");
+  if (!chars) return "*";
+  return `${chars.slice(0, Math.min(4, chars.length))}*`;
+}
+
+function compactMeterLabel(tier?: string, modelId?: string): string | undefined {
+  const t = tier?.toLowerCase() ?? "";
+  const m = modelId?.toLowerCase() ?? "";
+  if (t === "spark" || m.includes("spark")) return "Spark";
+  if (t === "fable" || m.includes("fable")) return "Fable";
+  if (t === "base-model-inference" || m.includes("reserve")) return "Reserve";
+  return undefined;
+}
+
+export function sanitizeProviderUsageSnapshot(snapshot: ProviderUsageSnapshot): ProviderUsageSnapshot {
+  return {
+    ...snapshot,
+    reports: snapshot.reports.map((report) => {
+      if (!report.accountLabel) return report;
+      const redacted = redactAccountLabel(report.accountLabel);
+      return redacted === report.accountLabel ? report : { ...report, accountLabel: redacted };
+    }),
+  };
+}
+
 type UsageLimit = { id: ProviderUsageWindowId; fraction: number; window: Record<string, unknown> };
 
 type UsageGroup = {
@@ -127,10 +157,12 @@ function normalizeReport(
     }];
   }
   return selectedGroups.flatMap((group) => {
+    const meter = compactMeterLabel(group.tier, group.modelId);
     const result: ProviderUsageReport = {
       provider,
       ...(label ? { accountLabel: label } : {}),
       ...(!label ? { accountIndex: reportIndex + 1 } : {}),
+      ...(meter ? { meterLabel: meter } : {}),
       ...(plan ? { plan } : {}),
       ...(group.modelId ? { modelId: group.modelId } : {}),
       ...(group.tier ? { tier: group.tier } : {}),
@@ -162,7 +194,7 @@ export function parseProviderUsageOutput(output: string, query: UsageQuery = {},
 async function fetchProviderUsage(): Promise<string> {
   const bin = resolveOmpBin();
   if (!bin) throw new Error("omp binary not found. Install oh-my-pi or set OMP_WEB_OMP_BIN.");
-  const { stdout } = await execFileAsync(bin, ["usage", "--json", "--redact"], {
+  const { stdout } = await execFileAsync(bin, ["usage", "--json"], {
     timeout: USAGE_TIMEOUT_MS,
     maxBuffer: USAGE_MAX_BUFFER,
     windowsHide: true,
@@ -183,5 +215,5 @@ function getUsageOutput(): Promise<string> {
 }
 
 export async function getProviderUsage(query: UsageQuery = {}): Promise<ProviderUsageSnapshot> {
-  return parseProviderUsageOutput(await getUsageOutput(), query);
+  return sanitizeProviderUsageSnapshot(parseProviderUsageOutput(await getUsageOutput(), query));
 }

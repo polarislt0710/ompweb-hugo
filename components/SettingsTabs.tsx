@@ -1,7 +1,7 @@
 "use client";
 
 import { useI18n } from "@/lib/i18n";
-import { BarChart3, Bot, Cable, Cpu, KeyRound, RefreshCw, Settings2, ShieldCheck, Sparkles } from "lucide-react";
+import { BarChart3, BookOpen, Bot, Cable, Cpu, KeyRound, Puzzle, RefreshCw, Settings2, ShieldCheck, Sparkles } from "lucide-react";
 import type { ComponentType, CSSProperties } from "react";
 
 export type SettingsTab =
@@ -34,12 +34,14 @@ export const SETTINGS_CATEGORIES: TabItem[] = [
   { id: "usage", label: "Usage", description: "Tokens, costs, cache analytics, and model breakdown", Icon: BarChart3 },
   { id: "intelligence", label: "Agent & Intelligence", description: "Advisor, memory, autolearn, compaction and retry", Icon: Sparkles },
   { id: "agents", label: "Agents", description: "Task agents, model settings, and tool policy", Icon: Bot },
-  { id: "mcp", label: "Extensions & Tools", description: "MCP servers, managed skills, and OMP plugins", Icon: Cable },
+  { id: "mcp", label: "MCP", description: "MCP servers and live connections", Icon: Cable },
+  { id: "skills", label: "Skills", description: "Discovered skills you can enable or disable", Icon: BookOpen },
+  { id: "plugins", label: "Plugins", description: "OMP plugin packages", Icon: Puzzle },
   { id: "system", label: "System & Updates", description: "App updates, runtime version, and active session restart", Icon: RefreshCw },
 ];
 
 export const getNormalizedActive = (tab: SettingsTab): SettingsTab => {
-  if (tab === "skills" || tab === "plugins" || tab === "extensions") return "mcp";
+  if (tab === "extensions") return "mcp";
   return tab;
 };
 

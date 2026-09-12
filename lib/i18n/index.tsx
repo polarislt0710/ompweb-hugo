@@ -4,12 +4,14 @@ import { useCallback, useEffect, useSyncExternalStore } from "react";
 import en from "./locales/en.json";
 import ja from "./locales/ja.json";
 import zhCN from "./locales/zh-CN.json";
+import zhTW from "./locales/zh-TW.json";
 
-export type Locale = "en" | "zh-CN" | "ja";
+export type Locale = "en" | "zh-TW" | "zh-CN" | "ja";
 
 export const LOCALES: Array<{ value: Locale; label: string }> = [
+  { value: "zh-TW", label: "繁體" },
+  { value: "zh-CN", label: "简体" },
   { value: "en", label: "EN" },
-  { value: "zh-CN", label: "中文" },
   { value: "ja", label: "日本語" },
 ];
 
@@ -17,9 +19,16 @@ const STORAGE_KEY = "omp-lang";
 
 const dictionaries: Record<Locale, Record<string, string>> = {
   en: en as Record<string, string>,
+  "zh-TW": zhTW as Record<string, string>,
   "zh-CN": zhCN as Record<string, string>,
   ja: ja as Record<string, string>,
 };
+
+const ZH_TW_MIGRATION_KEY = "omp-lang-zh-tw-default";
+
+function isLocale(value: string | null): value is Locale {
+  return value === "zh-TW" || value === "zh-CN" || value === "en" || value === "ja";
+}
 
 // Held on globalThis so a Fast Refresh module swap cannot split subscribers
 // across two Sets — components mounted before the swap would otherwise never
@@ -45,17 +54,29 @@ function detectLocale(): Locale {
   try {
     if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
       const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored === "en" || stored === "zh-CN" || stored === "ja") return stored;
+      const migrated = localStorage.getItem(ZH_TW_MIGRATION_KEY) === "1";
+      // Older builds mapped every zh browser to zh-CN. Move that default to
+      // Taiwan Traditional once; an explicit later pick of 简体 still sticks.
+      if (stored === "zh-CN" && !migrated) {
+        localStorage.setItem(ZH_TW_MIGRATION_KEY, "1");
+        localStorage.setItem(STORAGE_KEY, "zh-TW");
+        return "zh-TW";
+      }
+      if (isLocale(stored)) {
+        if (!migrated) localStorage.setItem(ZH_TW_MIGRATION_KEY, "1");
+        return stored;
+      }
     }
   } catch {
     // storage unavailable (private mode etc.)
   }
   if (typeof navigator !== "undefined" && navigator.language) {
     const lang = navigator.language.toLowerCase();
-    if (lang.startsWith("zh")) return "zh-CN";
+    if (lang === "zh-cn" || lang.startsWith("zh-hans") || lang.startsWith("zh-sg")) return "zh-CN";
+    if (lang.startsWith("zh")) return "zh-TW";
     if (lang.startsWith("ja")) return "ja";
   }
-  return "en";
+  return "zh-TW";
 }
 
 function getLocale(): Locale {

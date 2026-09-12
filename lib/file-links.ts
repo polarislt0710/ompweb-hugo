@@ -54,6 +54,22 @@ function looksLikeRelativeFileHref(href: string): boolean {
   return /(^|\/)\.?[^/]+\.[^/.]+$/.test(href);
 }
 
+const AGENT_FILE_SCHEME = /^(sandbox|computer|local|attachment|vscode-local):/i;
+
+/** Codex / Claude Code write `sandbox:/abs/path` instead of `file://` or a relative href. */
+export function stripAgentFileScheme(href: string): string {
+  const trimmed = href.trim();
+  const withHost = trimmed.match(/^(sandbox|computer|local|attachment|vscode-local):\/\//i);
+  if (withHost) {
+    let rest = trimmed.slice(withHost[0].length);
+    if (/^localhost\//i.test(rest)) rest = rest.slice("localhost".length);
+    else if (/^localhost$/i.test(rest)) rest = "/";
+    return rest.startsWith("/") || /^[a-zA-Z]:\//.test(rest) ? rest : `/${rest}`;
+  }
+  if (AGENT_FILE_SCHEME.test(trimmed)) return trimmed.replace(AGENT_FILE_SCHEME, "");
+  return trimmed;
+}
+
 function fileUrlToPath(href: string): string | null {
   try {
     const url = new URL(href);
@@ -81,7 +97,7 @@ export function resolveLocalFileHref(
 
   let candidate: string | null = null;
   let candidateKind: "absolute" | "relative" | null = null;
-  const decodedHref = safeDecode(cleanHref);
+  const decodedHref = stripAgentFileScheme(safeDecode(cleanHref));
   const isBackslashUncPath = decodedHref.startsWith("\\\\");
   const normalizedHref = normalizeFilePathSlashes(decodedHref);
   const lowerHref = normalizedHref.toLowerCase();

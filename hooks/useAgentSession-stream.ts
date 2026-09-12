@@ -184,7 +184,7 @@ export function toThinkingModelMeta(model: { provider?: string; id?: string; nam
   return { provider: model.provider, modelId: model.id, name: model.name, reasoning: model.reasoning, thinking: model.thinking };
 }
 
-export type ExtensionUiDialogRequest = Extract<ExtensionUiRequest, { method: "select" | "confirm" | "input" | "editor" }>;
+export type ExtensionUiDialogRequest = Extract<ExtensionUiRequest, { method: "select" | "confirm" | "input" | "editor" | "ask" }>;
 export type ExtensionUiCustomRequest = Extract<ExtensionUiRequest, { method: "custom" }>;
 // omp's rpc-ui frames add open_url (OAuth) and cancel on top of lib/types' union.
 export type IncomingExtensionUiRequest =
@@ -241,6 +241,18 @@ export const EVENT_STREAM_SLOW_CONNECT_MS = 4_000;
 export const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " ", "Space", "Spacebar"]);
 export function isQuotaLikeError(text: string): boolean {
   return /429|quota|RESOURCE_EXHAUSTED|Cloud Code Assist/i.test(text);
+}
+
+/** Rewrite provider JSON blobs into a short, actionable line. Unknown text is unchanged. */
+export function formatProviderError(text: string): string {
+  const trimmed = text.trim();
+  if (/Cloud Code Assist API error \(429\)|RESOURCE_EXHAUSTED/i.test(trimmed)) {
+    return translate("agentSession.antigravityQuota");
+  }
+  if (/unsupported value:\s*'none'.*gpt-6-astra|gpt-6-astra.*'none'/i.test(trimmed)) {
+    return translate("agentSession.astraNoNoneEffort");
+  }
+  return trimmed;
 }
 export type EventStreamConnectionStatus = "connected" | "timeout" | "closed";
 

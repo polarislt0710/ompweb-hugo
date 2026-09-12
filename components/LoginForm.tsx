@@ -2,8 +2,11 @@
 
 import { LockKeyhole } from "lucide-react";
 import { FormEvent, useState } from "react";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { useI18n } from "@/lib/i18n";
 
 export function LoginForm() {
+  const { t } = useI18n();
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -19,21 +22,24 @@ export function LoginForm() {
         body: JSON.stringify({ password }),
       });
       if (!response.ok) {
-        setError("Incorrect password. Please try again.");
+        setError(t("loginForm.incorrect"));
         return;
       }
       // Full reload so the new auth cookie is picked up by middleware
       // and server components — SPA navigation alone may keep stale state.
       window.location.replace("/");
     } catch {
-      setError("Could not sign in. Please check your connection and try again.");
+      setError(t("loginForm.failed"));
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <main style={{ flex: 1, display: "grid", placeItems: "center", padding: 20, background: "var(--bg)" }}>
+    <main style={{ flex: 1, display: "grid", placeItems: "center", padding: 20, background: "var(--bg)", position: "relative" }}>
+      <div style={{ position: "absolute", top: 16, right: 16 }}>
+        <LanguageSwitcher />
+      </div>
       <section
         aria-labelledby="login-title"
         style={{ width: "min(100%, 380px)", padding: "32px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: "var(--radius-modal)", boxShadow: "var(--shadow-modal)" }}
@@ -41,11 +47,11 @@ export function LoginForm() {
         <div style={{ width: 40, height: 40, display: "grid", placeItems: "center", borderRadius: "50%", background: "var(--user-bg)", color: "var(--accent)", marginBottom: 20 }}>
           <LockKeyhole size={19} aria-hidden="true" />
         </div>
-        <h1 id="login-title" className="display-serif" style={{ margin: 0, fontSize: 28, lineHeight: 1.1, color: "var(--text)" }}>Welcome back</h1>
-        <p style={{ margin: "10px 0 24px", color: "var(--text-muted)", fontSize: 13, lineHeight: 1.5 }}>Enter the password for this omp web workspace.</p>
+        <h1 id="login-title" className="display-serif" style={{ margin: 0, fontSize: 28, lineHeight: 1.1, color: "var(--text)" }}>{t("loginForm.title")}</h1>
+        <p style={{ margin: "10px 0 24px", color: "var(--text-muted)", fontSize: 13, lineHeight: 1.5 }}>{t("loginForm.subtitle")}</p>
         <form onSubmit={signIn} style={{ display: "grid", gap: 14 }}>
           <label htmlFor="web-password" style={{ display: "grid", gap: 6, color: "var(--text-muted)", fontSize: 12, fontWeight: 600 }}>
-            Password
+            {t("loginForm.password")}
             <input
               id="web-password"
               type="password"
@@ -61,7 +67,7 @@ export function LoginForm() {
           </label>
           {error && <p id="password-error" role="alert" style={{ margin: 0, color: "var(--status-error)", fontSize: 12 }}>{error}</p>}
           <button type="submit" disabled={submitting} style={{ minHeight: 36, border: 0, borderRadius: "var(--radius-control)", background: "var(--accent-strong)", color: "var(--on-accent)", fontWeight: 600, cursor: submitting ? "wait" : "pointer", opacity: submitting ? 0.7 : 1 }}>
-            {submitting ? "Unlocking…" : "Unlock workspace"}
+            {submitting ? t("loginForm.unlocking") : t("loginForm.unlock")}
           </button>
         </form>
       </section>

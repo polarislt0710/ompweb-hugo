@@ -10,6 +10,8 @@ export interface ProviderUsageReport {
   provider: string;
   accountLabel?: string;
   accountIndex?: number;
+  /** Short meter tag when the same account has more than one quota row, e.g. Spark / Fable. */
+  meterLabel?: string;
   plan?: string;
   modelId?: string;
   tier?: string;

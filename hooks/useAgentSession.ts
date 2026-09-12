@@ -20,6 +20,7 @@ import { getToolNamesForPreset, type ToolPreset } from "@/lib/tool-presets";
 import { getPreferredToolPreset, setPreferredToolPreset } from "@/lib/tool-preset-preference";
 import { toast } from "@/components/ui/toast";
 import { expandWebSlashCommand } from "@/lib/web-slash-commands";
+import { applyStoredOutputStyle } from "@/lib/output-styles";
 import { validateOutgoingPrompt } from "@/lib/image-attachments";
 import { createActiveGoal, parseActiveGoal, type ActiveGoal, type ActivePlan } from "@/lib/web-mode-state";
 import type { HostToolDefinition, HostUriSchemeDefinition, RpcAvailableSlashCommand, SessionStatsInfo, TodoPhase } from "@/lib/pi-types";
@@ -76,6 +77,7 @@ import {
   describeMcpMountNotice,
   extractMessageText,
   historyEntryToSubagentInfo,
+  formatProviderError,
   isQuotaLikeError,
   isSafeOpenUrl,
   normalizeThinkingLevel,
@@ -160,11 +162,13 @@ function readTerminalAgentError(event: AgentEvent): string | null {
  * the stop instead of treating the tool activity as a successful answer. */
 function hasVisibleAssistantContent(value: unknown): boolean {
   if (!isRecord(value) || value.role !== "assistant") return false;
+  if (typeof value.errorMessage === "string" && value.errorMessage.trim()) return true;
   if (!Array.isArray(value.content)) return typeof value.content === "string" && value.content.trim().length > 0;
   return value.content.some((block) => {
     if (!isRecord(block)) return false;
-    if (block.type === "text") return typeof block.text === "string" && block.text.trim().length > 0;
     if (block.type === "image") return true;
+    // Gemini / Antigravity sometimes emit text under types other than "text".
+    if (typeof block.text === "string" && block.text.trim().length > 0) return true;
     return false;
   });
 }
@@ -1242,6 +1246,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       case "confirm":
       case "input":
       case "editor":
+      case "ask":
         if (extensionDialogClearTimerRef.current) {
           clearTimeout(extensionDialogClearTimerRef.current);
           extensionDialogClearTimerRef.current = null;
@@ -1333,11 +1338,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       optimisticUserMessageKeyRef.current = null;
       if (!agentRunningRef.current) return;
       if (runError) {
-        addNotice({ type: "error", message: runError });
+        const display = formatProviderError(runError);
+        addNotice({ type: "error", message: display });
         if (!isQuotaLikeError(runError)) {
-          toast.error("Request failed", runError, { timeout: 12000 });
+          toast.error("Request failed", display, { timeout: 12000 });
         } else {
-          surfaceQuotaOnStream(runError);
+          surfaceQuotaOnStream(display);
         }
       } else if (quotaMessage && isQuotaLikeError(quotaMessage) && !hadContent) {
         // Silent stop: no assistant bubble to stamp — the shelf notice is the
@@ -1613,16 +1619,23 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const handleAgentEvent = useCallback((event: AgentEvent) => {
     switch (event.type) {
-      case "agent_start":
+      case "agent_start": {
         interruptReplyPendingRef.current = false;
+        const nestedStart = agentRunningRef.current;
         agentRunningRef.current = true;
         setAgentRunning(true);
         setAgentPhase({ kind: "waiting_model" });
         dispatch({ type: "start" });
-        runHadContentRef.current = false;
-        lastQuotaErrorRef.current = null;
-        lastRunErrorRef.current = null;
+        // A second agent_start in the same prompt (retry, prewalk, advisor)
+        // must not wipe the content flag — that is what toasted "stopped
+        // without a response" after Gemini had already replied.
+        if (!nestedStart) {
+          runHadContentRef.current = false;
+          lastQuotaErrorRef.current = null;
+          lastRunErrorRef.current = null;
+        }
         break;
+      }
       case "agent_end": {
         // isTerminal === false means an async delivery resumes this run soon.
         if (event.isTerminal === false) break;
@@ -1654,14 +1667,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         const errorMessage = terminalError
           ?? (!hadContent && quotaMessage && isQuotaLikeError(quotaMessage) ? quotaMessage : null);
         if (errorMessage) {
-          addNotice({ type: "error", message: errorMessage });
+          const display = formatProviderError(errorMessage);
+          addNotice({ type: "error", message: display });
           if (isQuotaLikeError(errorMessage)) {
             // Inline chat banner on the live bubble when still streaming;
             // otherwise the shelf notice is the in-chat message. No toast —
             // quota must read as a chat message, not a transient popup.
-            surfaceQuotaOnStream(errorMessage);
+            surfaceQuotaOnStream(display);
           } else {
-            toast.error("Request failed", errorMessage, { timeout: 12000 });
+            toast.error("Request failed", display, { timeout: 12000 });
           }
         } else if (!hadContent && !wasSlashCommand) {
           const message = translate("agentSession.responseFailed");
@@ -2167,6 +2181,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     optimisticUserMessageKeyRef.current = userMessageKey(userMsg);
     promptRunIdRef.current = promptRunId;
     agentRunningRef.current = true;
+    runHadContentRef.current = false;
+    lastQuotaErrorRef.current = null;
+    lastRunErrorRef.current = null;
     slashCommandRunRef.current = isSlashCommandPrompt;
     // A new run starts fresh: drop any rescued in-flight reconcile state from
     // the previous run (its late response is fenced out by the new run id).
@@ -2747,7 +2764,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             });
           }
           if (commandName === "plan") setActivePlan({ objective: args });
-          const sent = await handleSend(expansion.prompt);
+          const sent = await handleSend(applyStoredOutputStyle(expansion.prompt));
           if (!sent) {
             if (commandName === "plan") setActivePlan(null);
             return { handled: true, retainInput: true };

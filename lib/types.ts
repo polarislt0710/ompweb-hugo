@@ -170,6 +170,35 @@ export type AgentMessage =
   | PythonExecutionMessage
   | FileMentionMessage;
 
+export interface ExtensionAskDialogOption {
+  label: string;
+  description?: string;
+  preview?: string;
+}
+
+export interface ExtensionAskDialogQuestion {
+  id: string;
+  question: string;
+  header?: string;
+  options: ExtensionAskDialogOption[];
+  multi?: boolean;
+  recommended?: number;
+}
+
+export interface ExtensionAskDialogResultItem {
+  id: string;
+  question: string;
+  options: string[];
+  multi: boolean;
+  selectedOptions: string[];
+  customInput?: string;
+  note?: string;
+}
+
+export type ExtensionAskDialogResult =
+  | { kind: "submit"; results: ExtensionAskDialogResultItem[] }
+  | { kind: "chat" };
+
 export type ExtensionUiRequest =
   | {
       type: "extension_ui_request";
@@ -177,6 +206,14 @@ export type ExtensionUiRequest =
       method: "select";
       title: string;
       options: string[];
+      timeout?: number;
+      expiresAt?: number;
+    }
+  | {
+      type: "extension_ui_request";
+      id: string;
+      method: "ask";
+      questions: ExtensionAskDialogQuestion[];
       timeout?: number;
       expiresAt?: number;
     }

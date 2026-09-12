@@ -7,17 +7,19 @@ import { encodeFilePathForApi } from "@/lib/file-paths";
 import { normalizeDisplayMath, useMarkdownPlugins } from "../lib/markdown";
 import { markdownCodeRenderer } from "./MarkdownCode";
 import { ClickableImage } from "./ImageLightbox";
+import { MediaAttachment, mediaKind } from "./MediaAttachment";
 
 interface MarkdownBodyProps {
   children: string;
   className?: string;
   isStreaming?: boolean;
   cwd?: string;
+  sessionId?: string | null;
   onOpenFile?: (filePath: string) => void;
   suppressImages?: boolean;
 }
 
-export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile, suppressImages = false }: MarkdownBodyProps) {
+export function MarkdownBody({ children, className, isStreaming, cwd, sessionId, onOpenFile, suppressImages = false }: MarkdownBodyProps) {
   const normalizedMarkdown = useMemo(() => normalizeDisplayMath(children), [children]);
   const { remarkPlugins, rehypePlugins } = useMarkdownPlugins(normalizedMarkdown);
 
@@ -28,8 +30,11 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
       delete (imgProps as { node?: unknown }).node;
       if (suppressImages) return alt ?? null;
       const filePath = typeof src === "string" ? resolveLocalFileHref(src, cwd) : null;
+      if (filePath && mediaKind(filePath) === "image") {
+        return <MediaAttachment filePath={filePath} label={alt} sessionId={sessionId} />;
+      }
       const imageSrc = filePath
-        ? `/api/files/${encodeFilePathForApi(filePath)}?type=read`
+        ? `/api/files/${encodeFilePathForApi(filePath)}${sessionId ? `?type=read&sessionId=${encodeURIComponent(sessionId)}` : "?type=read"}`
         : src;
       // Dynamic local paths are served directly by the file API.
       return <ClickableImage src={imageSrc} alt={alt ?? ""} loading="lazy" {...imgProps} />;
@@ -93,7 +98,17 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
       if (imageParts.length > 0 && !hasMeaningfulText(textParts)) {
         return <>{children}</>;
       }
-      const filePath = onOpenFile ? resolveLocalFileHref(href, cwd) : null;
+      const filePath = resolveLocalFileHref(href, cwd);
+      const kind = filePath ? mediaKind(filePath) : null;
+      if (filePath && kind) {
+        const label = hasMeaningfulText(textParts) ? String(textParts.map((part) => typeof part === "string" ? part : "").join("")).trim() : undefined;
+        return (
+          <>
+            <MediaAttachment filePath={filePath} label={label || undefined} sessionId={sessionId} />
+            {imageParts}
+          </>
+        );
+      }
       const openFile = onOpenFile;
       if (filePath && openFile) {
         const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -124,7 +139,7 @@ export function MarkdownBody({ children, className, isStreaming, cwd, onOpenFile
       );
     },
     };
-  }, [isStreaming, cwd, onOpenFile, suppressImages]);
+  }, [isStreaming, cwd, sessionId, onOpenFile, suppressImages]);
 
   return (
     <div className={["markdown-body", className].filter(Boolean).join(" ")}>

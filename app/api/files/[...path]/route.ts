@@ -7,6 +7,7 @@ import {
   getAllowedFileRoots,
   isExistingFilePathAllowed,
   isFilePathAllowed,
+  isGeneratedImageTempPath,
   isWindowsAbsolutePath,
   normalizeSlashes,
 } from "@/lib/file-access";
@@ -20,6 +21,7 @@ import {
   getFileExt,
   getImageMime,
   getStreamSecurityHeaders,
+  getVideoMime,
 } from "@/lib/file-types";
 import { resolveDirentIsDirectory } from "@/lib/file-dirent";
 import { isFilePathReferencedBySession } from "@/lib/session-file-references";
@@ -425,11 +427,13 @@ export async function GET(
 
     const allowedRoots = await getAllowedFileRoots();
     const allowedByRoot = isFilePathAllowed(filePath, allowedRoots);
+    const allowedByGeneratedTemp = !allowedByRoot && type !== "list" && isGeneratedImageTempPath(filePath);
     const allowedBySessionReference =
       !allowedByRoot &&
+      !allowedByGeneratedTemp &&
       type !== "list" &&
       await isFilePathReferencedBySession(filePath, sessionId);
-    if (!allowedByRoot && !allowedBySessionReference) {
+    if (!allowedByRoot && !allowedByGeneratedTemp && !allowedBySessionReference) {
       return NextResponse.json({ error: "Access denied", code: "access_denied" }, { status: 403 });
     }
 
@@ -440,7 +444,7 @@ export async function GET(
       return NextResponse.json({ error: "Not found", code: "file_not_found" }, { status: 404 });
     }
 
-    if (!allowedBySessionReference && !isExistingFilePathAllowed(filePath, allowedRoots)) {
+    if (!allowedBySessionReference && !allowedByGeneratedTemp && !isExistingFilePathAllowed(filePath, allowedRoots)) {
       return NextResponse.json({ error: "Access denied", code: "access_denied" }, { status: 403 });
     }
 
@@ -454,6 +458,10 @@ export async function GET(
           return NextResponse.json({ error: "Image too large (>10MB)", code: "image_too_large" }, { status: 413 });
         }
         return streamFile(filePath, stat, imageMime, request.headers.get("range"));
+      }
+      const videoMime = getVideoMime(filePath);
+      if (videoMime) {
+        return streamFile(filePath, stat, videoMime, request.headers.get("range"));
       }
       const audioMime = getAudioMime(filePath);
       if (audioMime) {
@@ -475,7 +483,7 @@ export async function GET(
       if (!stat.isFile()) {
         return NextResponse.json({ error: "Not a file", code: "not_a_file" }, { status: 400 });
       }
-      const mime = getImageMime(filePath) || getAudioMime(filePath) || getDocumentMime(filePath) || "application/octet-stream";
+      const mime = getImageMime(filePath) || getVideoMime(filePath) || getAudioMime(filePath) || getDocumentMime(filePath) || "application/octet-stream";
       return streamFile(filePath, stat, mime, request.headers.get("range"), true);
     }
 
@@ -484,12 +492,13 @@ export async function GET(
         return NextResponse.json({ error: "Not a file", code: "not_a_file" }, { status: 400 });
       }
       const imageMime = getImageMime(filePath);
+      const videoMime = getVideoMime(filePath);
       const audioMime = getAudioMime(filePath);
       const documentMime = getDocumentMime(filePath);
       return NextResponse.json({
         size: stat.size,
         language: getLanguage(filePath),
-        mime: imageMime || audioMime || documentMime || "text/plain",
+        mime: imageMime || videoMime || audioMime || documentMime || "text/plain",
         previewKind: documentPreviewKind(filePath),
       });
     }

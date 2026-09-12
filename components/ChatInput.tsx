@@ -2,6 +2,20 @@
 
 import React, { useRef, useState, useCallback, useEffect, useLayoutEffect, useImperativeHandle, forwardRef, memo, KeyboardEvent } from "react";
 import { ChevronDown, ListChecks, Loader2, Mic, Paperclip, Plus, Shrink, Sparkles, Wrench, Zap } from "lucide-react";
+import { ComposerModeBar } from "./ChatInput-composer-modes";
+import {
+  composerModeSlashLine,
+  readComposerMode,
+  toggleComposerMode,
+  writeComposerMode,
+  type ComposerMode,
+} from "@/lib/composer-modes";
+import {
+  applyOutputStyle,
+  readOutputStyleId,
+  writeOutputStyleId,
+  type OutputStyleId,
+} from "@/lib/output-styles";
 import { getSubmitDuringRunBehavior } from "@/lib/composer-prefs";
 import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
 import type { ActiveGoal, ActivePlan } from "@/lib/web-mode-state";
@@ -269,6 +283,8 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const [value, setValue] = useState(() => (draftKey ? getDraft(draftKey)?.value ?? "" : ""));
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
+  const [composerMode, setComposerMode] = useState<ComposerMode>(() => readComposerMode(draftKey));
+  const [outputStyleId, setOutputStyleId] = useState<OutputStyleId>(() => readOutputStyleId());
   const [contextOpen, setContextOpen] = useState(false);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [plusExpanded, setPlusExpanded] = useState<"tools" | "advisor" | null>(null);
@@ -650,12 +666,37 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     return error !== null;
   }, []);
 
+  useEffect(() => {
+    writeComposerMode(draftKey, composerMode);
+  }, [draftKey, composerMode]);
+
+  useEffect(() => {
+    writeOutputStyleId(outputStyleId);
+  }, [outputStyleId]);
+
   const handleSend = useCallback(async () => {
     const msg = value.trim();
     if (!msg && !attachedImages.length && !attachedTextFiles.length) return;
     if (isStreaming) return;
     onAudioUnlock?.();
     const composedMessage = composeMessageWithTextAttachments(msg, attachedTextFiles);
+    const modeLine = !msg.startsWith("/") ? composerModeSlashLine(composerMode, composedMessage) : null;
+    if (modeLine && onBuiltinCommand) {
+      const expansion = expandWebSlashCommand(modeLine);
+      const outgoing = expansion.kind === "expand"
+        ? applyOutputStyle(outputStyleId, expansion.prompt)
+        : applyOutputStyle(outputStyleId, composedMessage);
+      if (rejectsOversizedPrompt(outgoing, attachedImages)) return;
+      const sentValue = value;
+      const result = await onBuiltinCommand(modeLine);
+      if (result.handled) {
+        if (!result.error && !result.retainInput && valueRef.current === sentValue) clearInput();
+        return;
+      }
+      onSend(outgoing, attachedImages.length ? attachedImages : undefined);
+      clearInput();
+      return;
+    }
     if (!attachedImages.length && !attachedTextFiles.length && msg.startsWith("/") && onBuiltinCommand) {
       const expansion = expandWebSlashCommand(msg);
       if (expansion.kind === "expand" && rejectsOversizedPrompt(expansion.prompt, attachedImages)) return;
@@ -669,9 +710,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       }
     }
     if (rejectsOversizedPrompt(composedMessage, attachedImages)) return;
-    onSend(composedMessage, attachedImages.length ? attachedImages : undefined);
+    onSend(applyOutputStyle(outputStyleId, composedMessage), attachedImages.length ? attachedImages : undefined);
     clearInput();
-  }, [value, attachedImages, attachedTextFiles, isStreaming, onBuiltinCommand, onSend, clearInput, onAudioUnlock, rejectsOversizedPrompt]);
+  }, [value, attachedImages, attachedTextFiles, isStreaming, onBuiltinCommand, onSend, clearInput, onAudioUnlock, rejectsOversizedPrompt, composerMode, outputStyleId]);
 
   const slashQuery = value.startsWith("/") && !/\s/.test(value.slice(1))
     ? value.slice(1).toLowerCase()
@@ -971,8 +1012,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       // own ACP handlers can run them.
       const expansion = expandWebSlashCommand(msg);
       if (expansion.kind === "expand") {
-        if (rejectsOversizedPrompt(expansion.prompt, attachedImages)) return;
-        onPromptWithStreamingBehavior(expansion.prompt, streamingBehavior, attachedImages.length ? attachedImages : undefined);
+        const prompt = applyOutputStyle(outputStyleId, expansion.prompt);
+        if (rejectsOversizedPrompt(prompt, attachedImages)) return;
+        onPromptWithStreamingBehavior(prompt, streamingBehavior, attachedImages.length ? attachedImages : undefined);
         clearInput();
         return;
       }
@@ -988,14 +1030,22 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       clearInput();
       return;
     }
-    if (rejectsOversizedPrompt(msg, attachedImages)) return;
+    const modeLine = !msg.startsWith("/") ? composerModeSlashLine(composerMode, msg) : null;
+    const queuedText = modeLine
+      ? (() => {
+          const expansion = expandWebSlashCommand(modeLine);
+          return expansion.kind === "expand" ? expansion.prompt : msg;
+        })()
+      : msg;
+    const prompt = applyOutputStyle(outputStyleId, queuedText);
+    if (rejectsOversizedPrompt(prompt, attachedImages)) return;
     if (mode === "steer" && onSteer) {
-      onSteer(msg, attachedImages.length ? attachedImages : undefined);
+      onSteer(prompt, attachedImages.length ? attachedImages : undefined);
     } else if (mode === "followup" && onFollowUp) {
-      onFollowUp(msg, attachedImages.length ? attachedImages : undefined);
+      onFollowUp(prompt, attachedImages.length ? attachedImages : undefined);
     }
     clearInput();
-  }, [value, attachedImages, attachedTextFiles, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock, t, advisorEnabled, rejectsOversizedPrompt]);
+  }, [value, attachedImages, attachedTextFiles, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock, t, advisorEnabled, rejectsOversizedPrompt, composerMode, outputStyleId]);
   // A typed, text-only message during a run is a queued follow-up. Keep Stop
   // as the action while the composer is empty or contains attachments.
   const primaryActionQueuesMessage =
@@ -2561,6 +2611,18 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
                 )}
               </div>
             )}
+
+            <ComposerModeBar
+              mode={composerMode}
+              onModeChange={(next) => setComposerMode((current) => toggleComposerMode(current, next))}
+              outputStyleId={outputStyleId}
+              onOutputStyleChange={(id) => {
+                writeOutputStyleId(id);
+                setOutputStyleId(id);
+              }}
+              isStreaming={isStreaming}
+              t={t}
+            />
 
             {/* Fast toggle — only for models that support fast mode. Stays
                 visible while the agent runs (disabled) so it does not look

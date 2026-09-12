@@ -5,6 +5,7 @@ import { Copy, Check, GitFork, CornerUpLeft, ChevronRight, ChevronDown, Brain, E
 import { MarkdownBody } from "./MarkdownBody";
 import { ClickableImage } from "./ImageLightbox";
 import { translate, useI18n, type Locale } from "@/lib/i18n";
+import { formatProviderError } from "@/hooks/useAgentSession-stream";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
 import { isEmptyThinkingBlock } from "@/lib/message-display";
 import { Tooltip, Collapsible, CollapsibleTrigger } from "./ui/primitives";
@@ -731,7 +732,7 @@ function AssistantMessageView({
               }}
             >
               <CircleAlert size={14} strokeWidth={1.8} aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }} />
-              <span>{t(errorMessage)}</span>
+              <span>{formatProviderError(errorMessage)}</span>
             </div>
           )
         )}
@@ -748,7 +749,7 @@ function AssistantMessageView({
 
 function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCallDurations, cwd, onOpenFile, sessionId, entryId, blockIndex, toolCallsDefaultCollapsed }: { block: AssistantContentBlock; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number>; cwd?: string; onOpenFile?: (filePath: string) => void; sessionId?: string; entryId?: string; blockIndex: number; toolCallsDefaultCollapsed: boolean }) {
   if (block.type === "text") {
-    return <TextBlock block={block as TextContent} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} />;
+    return <TextBlock block={block as TextContent} isStreaming={isStreaming} cwd={cwd} sessionId={sessionId} onOpenFile={onOpenFile} />;
   }
   if (block.type === "thinking") {
     return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} />;
@@ -767,12 +768,13 @@ function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCal
 // instead of object identity: finished blocks of the streaming message then
 // skip their ReactMarkdown re-parse and only the actively growing block
 // re-renders per frame.
-const TextBlock = memo(function TextBlock({ block, isStreaming, cwd, onOpenFile }: { block: TextContent; isStreaming?: boolean; cwd?: string; onOpenFile?: (filePath: string) => void }) {
-  return <SafeMarkdownBody isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>{block.text}</SafeMarkdownBody>;
+const TextBlock = memo(function TextBlock({ block, isStreaming, cwd, sessionId, onOpenFile }: { block: TextContent; isStreaming?: boolean; cwd?: string; sessionId?: string; onOpenFile?: (filePath: string) => void }) {
+  return <SafeMarkdownBody isStreaming={isStreaming} cwd={cwd} sessionId={sessionId} onOpenFile={onOpenFile}>{block.text}</SafeMarkdownBody>;
 }, (prev, next) => (
   prev.block.text === next.block.text
   && prev.isStreaming === next.isStreaming
   && prev.cwd === next.cwd
+  && prev.sessionId === next.sessionId
   && prev.onOpenFile === next.onOpenFile
 ));
 

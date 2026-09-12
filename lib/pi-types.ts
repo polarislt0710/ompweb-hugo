@@ -175,6 +175,21 @@ export interface SessionStatsInfo {
  */
 export type OmpExtensionUiRequest =
   | { type: "extension_ui_request"; id: string; method: "select"; title: string; options: string[]; timeout?: number; expiresAt?: number }
+  | {
+      type: "extension_ui_request";
+      id: string;
+      method: "ask";
+      questions: Array<{
+        id: string;
+        question: string;
+        header?: string;
+        options: Array<{ label: string; description?: string; preview?: string }>;
+        multi?: boolean;
+        recommended?: number;
+      }>;
+      timeout?: number;
+      expiresAt?: number;
+    }
   | { type: "extension_ui_request"; id: string; method: "confirm"; title: string; message: string; timeout?: number; expiresAt?: number }
   | { type: "extension_ui_request"; id: string; method: "input"; title: string; placeholder?: string; timeout?: number; expiresAt?: number }
   | { type: "extension_ui_request"; id: string; method: "editor"; title: string; prefill?: string; promptStyle?: boolean; timeout?: number; expiresAt?: number }

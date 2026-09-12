@@ -4,6 +4,20 @@ All notable changes to **omp-web** (`@kahme247/ompweb`) are documented in this f
 
 ---
 
+## Fork notes (Hugo / OMP WEB)
+
+Private fork of kahme247/ompweb as a daily driver around local `omp`.
+
+Upcoming (this tree, not upstream):
+
+- Theme Studio port (all presets) from 37chengshan/ompweb — in progress
+- Grill Me Ask cards on the real omp `ask` protocol
+- Localhost iframe browser pane (ORCA at 127.0.0.1:8120) — in progress
+
+Do not treat this changelog as an npm publish of `@kahme247/ompweb`.
+
+---
+
 ## [v0.3.6] - 2026-08-28
 
 This release adds workspace renaming and reordering, improved context compaction views, prompt queue expansion, and clear network startup banners.
