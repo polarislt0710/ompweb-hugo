@@ -5,6 +5,8 @@
  * exists and otherwise derives a fallback from the first user message.
  */
 
+import { stripOutputStyle } from "./output-styles";
+
 const MAX_DERIVED_TITLE_LENGTH = 60;
 
 /** First-line, control-character-free, whitespace-collapsed view of a title. */
@@ -22,7 +24,7 @@ export function sanitizeSessionTitle(value: string | undefined): string | undefi
  */
 export function deriveSessionTitleFromFirstMessage(firstMessage: string | undefined): string | null {
   if (!firstMessage || firstMessage === "(no messages)") return null;
-  const sanitized = sanitizeSessionTitle(firstMessage);
+  const sanitized = sanitizeSessionTitle(stripOutputStyle(firstMessage));
   if (!sanitized || !/[\p{L}\p{N}]/u.test(sanitized)) return null;
 
   const characters = Array.from(sanitized);

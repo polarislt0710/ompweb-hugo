@@ -2,6 +2,7 @@
 
 import { memo, useEffect, useRef, useState, useCallback, useMemo, type RefObject } from "react";
 import type { AgentMessage, TextContent } from "@/lib/types";
+import { stripOutputStyle } from "@/lib/output-styles";
 
 interface Props {
   messages: AgentMessage[];
@@ -27,12 +28,12 @@ export function extractPreviewText(msg: AgentMessage | Partial<AgentMessage>): s
   if (msg.role === "user") {
     const content = msg.content;
     if (typeof content === "string") {
-      raw = content;
+      raw = stripOutputStyle(content);
     } else if (Array.isArray(content)) {
-      raw = content
+      raw = stripOutputStyle(content
         .filter((b): b is TextContent => Boolean(b && typeof b === "object" && "type" in b && b.type === "text" && "text" in b && typeof b.text === "string"))
         .map((b) => b.text)
-        .join(" ");
+        .join(" "));
     }
   } else if (msg.role === "assistant") {
     const blocks = Array.isArray(msg.content) ? msg.content : [];

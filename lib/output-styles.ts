@@ -110,6 +110,13 @@ export function applyOutputStyle(styleId: string | null | undefined, message: st
   return `<output-style name="${style.id}">\n${style.prompt}\n</output-style>\n\n${message}`;
 }
 
+const OUTPUT_STYLE_BLOCK = /^<output-style\b[^>]*>[\s\S]*?<\/output-style>(?:\r?\n)*/i;
+
+/** Remove the hidden style wrapper so chat bubbles, copy, and titles show only the user's words. */
+export function stripOutputStyle(message: string): string {
+  return message.replace(OUTPUT_STYLE_BLOCK, "").replace(/^\uFEFF/, "");
+}
+
 export function applyStoredOutputStyle(message: string): string {
   return applyOutputStyle(readOutputStyleId(), message);
 }

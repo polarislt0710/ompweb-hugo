@@ -18,6 +18,14 @@ test("extractPreviewText extracts clean text from user string content", () => {
   assert.equal(preview, "move Explorer to right panel");
 });
 
+test("extractPreviewText hides output-style wrappers from user bubbles", () => {
+  const preview = extractPreviewText({
+    role: "user",
+    content: "<output-style name=\"eli15\">\nELI15: explain to a smart 15-year-old.\n</output-style>\n\n我見到條片已經剪好",
+  });
+  assert.equal(preview, "我見到條片已經剪好");
+});
+
 test("extractPreviewText cleans markdown formatting, code fences, and extra whitespace", () => {
   const preview = extractPreviewText({
     role: "user",

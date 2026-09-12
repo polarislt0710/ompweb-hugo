@@ -11,6 +11,7 @@ import { isEmptyThinkingBlock } from "@/lib/message-display";
 import { Tooltip, Collapsible, CollapsibleTrigger } from "./ui/primitives";
 import { useCopyFeedback } from "@/hooks/useCopyFeedback";
 import { formatCompactNumber } from "@/lib/format";
+import { stripOutputStyle } from "@/lib/output-styles";
 import { TaskResultPanel } from "./MessageView-task-panel";
 import { getResultDiff, PairedDiffResult, PairedResult } from "./MessageView-diff-view";
 import {
@@ -302,13 +303,14 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
   const [actionsActive, setActionsActive] = useState(false);
   const { copied, copy: copyContent } = useCopyFeedback();
 
-  const content =
+  const content = stripOutputStyle(
     typeof message.content === "string"
       ? message.content
       : message.content
           .filter((b): b is TextContent => b.type === "text")
           .map((b) => b.text)
-          .join("\n");
+          .join("\n"),
+  );
 
   const imageBlocks: ImageContent[] =
     typeof message.content === "string"
