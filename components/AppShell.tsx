@@ -1596,6 +1596,7 @@ export function AppShell() {
         {/* Top bar: 3-zone segmented control bar */}
         <div ref={topBarRef} className="shell-topbar" style={{
           position: "relative",
+          zIndex: 250,
           alignItems: "center",
           flexShrink: 0,
           borderBottom: "1px solid var(--border)",

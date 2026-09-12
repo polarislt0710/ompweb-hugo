@@ -142,7 +142,13 @@ export const SessionSidebar = memo(function SessionSidebar({ selectedSessionId, 
       if (showLoading) setLoading(true);
       const headers: Record<string, string> = {};
       if (sessionsEtagRef.current) headers["If-None-Match"] = sessionsEtagRef.current;
-      const res = await fetch("/api/sessions", { headers, signal: controller.signal, credentials: "include" });
+      const timeout = setTimeout(() => controller.abort(), 20_000);
+      let res: Response;
+      try {
+        res = await fetch("/api/sessions", { headers, signal: controller.signal, credentials: "include" });
+      } finally {
+        clearTimeout(timeout);
+      }
       if (res.status === 304) return;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const etag = res.headers.get("ETag");

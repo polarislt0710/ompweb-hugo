@@ -20,8 +20,10 @@ export function proxy(request: NextRequest) {
   // still reach the route; knowing the password is the CSRF gate.
   if (pathname === "/api/web-auth/session") return NextResponse.next();
 
+  const mutating = request.method !== "GET" && request.method !== "HEAD" && request.method !== "OPTIONS";
   if (
-    pathname.startsWith("/api/")
+    mutating
+    && pathname.startsWith("/api/")
     && shouldCheckApiRequestOrigin(request)
     && !isPublicTunnelOrigin(request)
     && !isApiRequestOriginAllowed(request)
