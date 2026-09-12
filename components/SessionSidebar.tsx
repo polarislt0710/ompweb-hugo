@@ -186,7 +186,10 @@ export const SessionSidebar = memo(function SessionSidebar({ selectedSessionId, 
         sessionRefreshTimerRef.current = setTimeout(() => setSessionRefreshDone(false), 2000);
       }
     } catch (e) {
-      if ((e as Error)?.name === "AbortError") return;
+      if ((e as Error)?.name === "AbortError") {
+        setError(t("sessionSidebar.loadFailed", { detail: "timeout" }));
+        return;
+      }
       setError(t("sessionSidebar.loadFailed", { detail: e instanceof Error ? e.message : String(e) }));
     } finally {
       initialLoadedRef.current = true;
@@ -257,8 +260,9 @@ export const SessionSidebar = memo(function SessionSidebar({ selectedSessionId, 
   }, []);
 
   useEffect(() => {
-    // Live running status and session-list invalidations arrive via SSE; the
-    // sidebar never has to poll while an agent is working.
+    if (loading) return;
+    // Open SSE only after the first session list returns. A hanging EventSource
+    // through Cloudflare Tunnel can stall Safari's other API calls.
     const source = new EventSource("/api/agent/running/events");
 
     source.onmessage = (e) => {
@@ -303,7 +307,7 @@ export const SessionSidebar = memo(function SessionSidebar({ selectedSessionId, 
       if (pendingRefreshRef.current) clearTimeout(pendingRefreshRef.current);
       source.close();
     };
-  }, [loadSessions, scheduleRefresh]);
+  }, [loading, loadSessions, scheduleRefresh]);
 
   useEffect(() => {
     const previous = previousRunningSessionIdsRef.current;
