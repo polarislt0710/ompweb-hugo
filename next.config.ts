@@ -19,6 +19,8 @@ const nextConfig = (phase: string): NextConfig => {
     // user-profile junctions while compiling.
     outputFileTracingRoot: process.cwd(),
     env: {
+      NEXT_PUBLIC_APP_VERSION: version,
+      NEXT_PUBLIC_OMP_WEB_VERSION: version,
       OMP_WEB_PUBLIC_HOST: process.env.OMP_WEB_PUBLIC_HOST ?? "",
     },
     // undici is loaded from a runtime dependency (lib/http-dispatcher.ts) to
@@ -109,10 +111,6 @@ const nextConfig = (phase: string): NextConfig => {
       if (isDev) return [globalRule, fileRule, rootNoCacheRule];
 
       return [globalRule, fileRule, staticImmutableRule, rootNoCacheRule];
-    },
-    env: {
-      NEXT_PUBLIC_APP_VERSION: version,
-      NEXT_PUBLIC_OMP_WEB_VERSION: version,
     },
   };
 };
