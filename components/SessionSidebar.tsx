@@ -142,7 +142,7 @@ export const SessionSidebar = memo(function SessionSidebar({ selectedSessionId, 
       if (showLoading) setLoading(true);
       const headers: Record<string, string> = {};
       if (sessionsEtagRef.current) headers["If-None-Match"] = sessionsEtagRef.current;
-      const res = await fetch("/api/sessions", { headers, signal: controller.signal });
+      const res = await fetch("/api/sessions", { headers, signal: controller.signal, credentials: "include" });
       if (res.status === 304) return;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const etag = res.headers.get("ETag");
@@ -199,7 +199,7 @@ export const SessionSidebar = memo(function SessionSidebar({ selectedSessionId, 
   const loadProjects = useCallback(async () => {
     const seq = ++projectsLoadSeqRef.current;
     try {
-      const res = await fetch("/api/projects");
+      const res = await fetch("/api/projects", { credentials: "include" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as { projects?: ManagedProject[] };
       // A newer request superseded this one — drop the stale response.

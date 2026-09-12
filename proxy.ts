@@ -2,13 +2,30 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isApiRequestOriginAllowed, shouldCheckApiRequestOrigin } from "@/lib/request-security";
 import { isValidWebSession, isWebPasswordEnabled, OMP_WEB_SESSION_COOKIE } from "@/lib/web-auth";
 
+function isPublicTunnelOrigin(request: NextRequest): boolean {
+  const origin = request.headers.get("origin");
+  if (!origin) return false;
+  try {
+    const host = new URL(origin).hostname.toLowerCase();
+    const allowed = (process.env.OMP_WEB_PUBLIC_HOST ?? "omp.bizobot.com").split(":")[0].toLowerCase();
+    return host === allowed;
+  } catch {
+    return false;
+  }
+}
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   // Cloudflare Tunnel rewrites Host to 127.0.0.1. The login form POST must
   // still reach the route; knowing the password is the CSRF gate.
   if (pathname === "/api/web-auth/session") return NextResponse.next();
 
-  if (pathname.startsWith("/api/") && shouldCheckApiRequestOrigin(request) && !isApiRequestOriginAllowed(request)) {
+  if (
+    pathname.startsWith("/api/")
+    && shouldCheckApiRequestOrigin(request)
+    && !isPublicTunnelOrigin(request)
+    && !isApiRequestOriginAllowed(request)
+  ) {
     return NextResponse.json({ error: "Cross-origin API requests are not allowed" }, { status: 403 });
   }
   if (!isWebPasswordEnabled()) {

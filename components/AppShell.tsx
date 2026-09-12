@@ -1504,7 +1504,8 @@ export function AppShell() {
       {/* Left sidebar: hidden on full-page Settings */}
       {!settingsTab && (
         <>
-      {/* Mobile overlay backdrop */}
+      {/* Mobile overlay backdrop — never intercept clicks on desktop. */}
+      {isMobile && (
       <div
         className={`sidebar-overlay-backdrop${mobileSidebarReady ? "" : " sidebar-mobile-pending"}`}
         onClick={() => setSidebarOpen(false)}
@@ -1518,6 +1519,7 @@ export function AppShell() {
           transition: "opacity var(--dur-slow) var(--ease-out-warm)",
         }}
       />
+      )}
 
       {/* Left sidebar */}
       <div
