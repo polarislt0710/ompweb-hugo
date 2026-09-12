@@ -3,21 +3,24 @@ import { isApiRequestOriginAllowed, shouldCheckApiRequestOrigin } from "@/lib/re
 import { isValidWebSession, isWebPasswordEnabled, OMP_WEB_SESSION_COOKIE } from "@/lib/web-auth";
 
 export function proxy(request: NextRequest) {
-  if (request.nextUrl.pathname.startsWith("/api/") && shouldCheckApiRequestOrigin(request) && !isApiRequestOriginAllowed(request)) {
+  const { pathname } = request.nextUrl;
+  // Cloudflare Tunnel rewrites Host to 127.0.0.1. The login form POST must
+  // still reach the route; knowing the password is the CSRF gate.
+  if (pathname === "/api/web-auth/session") return NextResponse.next();
+
+  if (pathname.startsWith("/api/") && shouldCheckApiRequestOrigin(request) && !isApiRequestOriginAllowed(request)) {
     return NextResponse.json({ error: "Cross-origin API requests are not allowed" }, { status: 403 });
   }
   if (!isWebPasswordEnabled()) {
-    return request.nextUrl.pathname === "/login"
+    return pathname === "/login"
       ? NextResponse.redirect(new URL("/", request.url))
       : NextResponse.next();
   }
 
-  const { pathname } = request.nextUrl;
   const hasSession = isValidWebSession(request.cookies.get(OMP_WEB_SESSION_COOKIE)?.value);
   if (pathname === "/login") {
     return hasSession ? NextResponse.redirect(new URL("/", request.url)) : NextResponse.next();
   }
-  if (pathname === "/api/web-auth/session") return NextResponse.next();
   if (hasSession) return NextResponse.next();
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "Password required", code: "password_required" }, { status: 401 });
