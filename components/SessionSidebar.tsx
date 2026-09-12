@@ -145,7 +145,7 @@ export const SessionSidebar = memo(function SessionSidebar({ selectedSessionId, 
       const timeout = setTimeout(() => controller.abort(), 20_000);
       let res: Response;
       try {
-        res = await fetch("/api/sessions", { headers, signal: controller.signal, credentials: "include" });
+        res = await fetch("/api/sessions", { headers, signal: controller.signal, credentials: "include", cache: "no-store" });
       } finally {
         clearTimeout(timeout);
       }
@@ -208,7 +208,7 @@ export const SessionSidebar = memo(function SessionSidebar({ selectedSessionId, 
   const loadProjects = useCallback(async () => {
     const seq = ++projectsLoadSeqRef.current;
     try {
-      const res = await fetch("/api/projects", { credentials: "include" });
+      const res = await fetch("/api/projects", { credentials: "include", cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as { projects?: ManagedProject[] };
       // A newer request superseded this one — drop the stale response.

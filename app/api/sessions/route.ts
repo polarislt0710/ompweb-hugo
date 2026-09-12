@@ -13,6 +13,8 @@ const SESSION_LIST_HEADERS = {
   Vary: "Cookie",
 } as const;
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: Request) {
   try {
     const sessions = await listAllSessions();
@@ -21,10 +23,18 @@ export async function GET(req: Request) {
     const body = { sessions, runningSessionIds, runningSessions };
     const bodyJson = JSON.stringify(body);
     const etag = `"${createHash("sha1").update(bodyJson).digest("hex").slice(0, 16)}"`;
+    const length = Buffer.byteLength(bodyJson);
     if (req.headers.get("if-none-match") === etag) {
       return new NextResponse(null, { status: 304, headers: { ETag: etag, ...SESSION_LIST_HEADERS } });
     }
-    return new NextResponse(bodyJson, { headers: { ETag: etag, "Content-Type": "application/json", ...SESSION_LIST_HEADERS } });
+    return new NextResponse(bodyJson, {
+      headers: {
+        ETag: etag,
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Length": String(length),
+        ...SESSION_LIST_HEADERS,
+      },
+    });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error), code: "internal_error" },
