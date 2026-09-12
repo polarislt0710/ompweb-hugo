@@ -24,11 +24,29 @@ function forwardedProto(request: Request): string {
   return new URL(request.url).protocol.replace(":", "");
 }
 
-/** Origin the browser used, even when Next sees an internal http://127.0.0.1 URL. */
+function isLoopbackHost(host: string): boolean {
+  const hostname = host.replace(/^\[|\]$/g, "").split(":")[0]?.toLowerCase() ?? "";
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
+}
+
+function firstHeader(request: Request, name: string): string | null {
+  const raw = request.headers.get(name);
+  if (!raw) return null;
+  const first = raw.split(",")[0].trim();
+  return first || null;
+}
+
+/** Origin the browser used, even when a tunnel rewrites Host to 127.0.0.1. */
 export function getExternalOrigin(request: Request): string | null {
-  const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
   const proto = forwardedProto(request);
-  if (host) return canonicalOrigin(`${proto}://${host}`);
+  const forwardedHost = firstHeader(request, "x-forwarded-host");
+  const host = request.headers.get("host");
+  const publicHost = process.env.OMP_WEB_PUBLIC_HOST?.trim() || null;
+  const chosen = forwardedHost
+    || (host && !isLoopbackHost(host) ? host : null)
+    || publicHost
+    || host;
+  if (chosen) return canonicalOrigin(`${proto}://${chosen}`);
   return canonicalOrigin(request.url);
 }
 

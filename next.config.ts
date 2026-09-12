@@ -18,6 +18,9 @@ const nextConfig = (phase: string): NextConfig => {
     // root, Next can choose a parent lockfile on Windows and traverse protected
     // user-profile junctions while compiling.
     outputFileTracingRoot: process.cwd(),
+    env: {
+      OMP_WEB_PUBLIC_HOST: process.env.OMP_WEB_PUBLIC_HOST ?? "",
+    },
     // undici is loaded from a runtime dependency (lib/http-dispatcher.ts) to
     // honor HTTP(S)_PROXY for server-side fetch; keep it external so the
     // bundler does not inline a second copy next to the global dispatcher.
