@@ -66,14 +66,15 @@ export function ProviderUsageBar() {
   const { snapshot, loading, error } = useProviderUsage("", 5 * 60_000);
   const reports = snapshot?.reports ?? [];
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
-  // SSR and the first client paint must match. Read the stored expand/collapse
-  // choice after mount — localStorage in useState() is what tripped hydration.
+  // The first render must match the server, where localStorage is unavailable,
+  // so start collapsed and apply the stored preference after mounting.
   const [collapsed, setCollapsed] = useState(true);
   useEffect(() => {
     try {
-      setCollapsed(window.localStorage.getItem(COLLAPSED_STORAGE_KEY) !== "false");
+      // No stored choice yet → stay hidden; an explicit expand persists.
+      if (window.localStorage.getItem(COLLAPSED_STORAGE_KEY) === "false") setCollapsed(false);
     } catch {
-      // Private mode: stay collapsed.
+      // Storage unavailable: keep the collapsed default.
     }
   }, []);
 

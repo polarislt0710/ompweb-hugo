@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { createElement, useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
 export type LightTheme =
   | "light"
@@ -241,6 +241,15 @@ export function nextThemePreference(preference: ThemePreference): ThemePreferenc
   return isDarkTheme(preference as Theme) ? "light" : "dark";
 }
 
+export function ThemeColor() {
+  // React matches hoisted metadata by content during hydration. Adopt the
+  // pre-paint value so it reuses this node instead of adding a fallback copy.
+  const color = typeof document === "undefined"
+    ? null
+    : document.querySelector('meta[name="theme-color"]')?.getAttribute("content");
+  return createElement("meta", { name: "theme-color", content: color || "#000000" });
+}
+
 export function applyDomTheme(theme: Theme): void {
   if (typeof document === "undefined") return;
   clearCustomStyles();
@@ -258,9 +267,12 @@ export function applyDomTheme(theme: Theme): void {
     cl.add(`theme-${theme}`);
   }
   document.documentElement.setAttribute("data-theme", theme);
-  const meta = THEME_BY_ID.get(theme);
-  if (meta?.category === "flowing") applyFlowBackground(meta.bg, meta.accent);
+  const themeDef = THEME_BY_ID.get(theme);
+  if (themeDef?.category === "flowing") applyFlowBackground(themeDef.bg, themeDef.accent);
   else clearFlowBackground();
+  const color = themeDef?.bg ?? ALL_THEMES.find((definition) => definition.id === theme)?.bg;
+  const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+  if (themeColorMeta && color) themeColorMeta.setAttribute("content", color);
 }
 
 function applyTheme(preference: ThemePreference): void {

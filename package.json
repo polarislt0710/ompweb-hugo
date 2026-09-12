@@ -1,6 +1,6 @@
 {
   "name": "@kahme247/ompweb",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "Web UI for the oh-my-pi (omp) coding agent",
   "homepage": "https://github.com/kahme247/ompweb#readme",
   "repository": {
@@ -48,6 +48,7 @@
     "tray:uninstall": "node bin/omp-web-tray.js --uninstall",
     "tray:start": "node bin/omp-web-tray.js --start",
     "tray:status": "node bin/omp-web-tray.js --status",
+    "sync:upstream": "bash scripts/sync-upstream.sh",
     "prepack": "npm run build",
     "release:check": "npm run typecheck && npm run lint && npm test && npm run build"
   },
