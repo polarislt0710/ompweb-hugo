@@ -165,17 +165,21 @@ export function saveCustomTheme(config: CustomThemeConfig): void {
 function clearFlowBackground(): void {
   if (typeof document === "undefined") return;
   document.documentElement.classList.remove("theme-flow-active");
-  document.body.style.background = "";
-  document.body.style.backgroundSize = "";
-  document.body.style.animation = "";
+  const bodyStyle = document.body?.style;
+  if (!bodyStyle) return;
+  bodyStyle.background = "";
+  bodyStyle.backgroundSize = "";
+  bodyStyle.animation = "";
 }
 
 function applyFlowBackground(bg: string, accent: string): void {
   if (typeof document === "undefined") return;
   document.documentElement.classList.add("theme-flow-active");
-  document.body.style.background = `linear-gradient(-45deg, ${bg}, color-mix(in srgb, ${accent} 25%, ${bg}), ${bg})`;
-  document.body.style.backgroundSize = "400% 400%";
-  document.body.style.animation = "omp-mesh-flow 18s ease infinite";
+  const bodyStyle = document.body?.style;
+  if (!bodyStyle) return;
+  bodyStyle.background = `linear-gradient(-45deg, ${bg}, color-mix(in srgb, ${accent} 25%, ${bg}), ${bg})`;
+  bodyStyle.backgroundSize = "400% 400%";
+  bodyStyle.animation = "omp-mesh-flow 18s ease infinite";
 }
 
 function applyCustomStyles(config: CustomThemeConfig): void {
@@ -203,9 +207,9 @@ function clearCustomStyles(): void {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
   for (const name of ["--accent", "--accent-strong", "--accent-hover", "--bg", "--bg-panel", "--border", "--text", "--text-muted", "--omp-o", "--omp-m", "--omp-p"]) {
-    root.style.removeProperty(name);
+    root.style?.removeProperty?.(name);
   }
-  root.removeAttribute("data-custom-mode");
+  root.removeAttribute?.("data-custom-mode");
 }
 
 function subscribe(cb: () => void): () => void {
