@@ -1,4 +1,8 @@
-# ompweb
+# ompweb-hugo
+
+Hugo's daily-driver fork of [kahme247/ompweb](https://github.com/kahme247/ompweb). You still need a local [`omp`](https://github.com/can1357/oh-my-pi) install — this repo is the web UI only.
+
+**Run this checkout** (`npm install` then `npm run dev` → http://127.0.0.1:30178). Stock `npx @kahme247/ompweb` does not include the fork changes. Setup: [HUGO.md](./HUGO.md).
 
 [![npm version](https://img.shields.io/npm/v/@kahme247/ompweb.svg?logo=npm&color=e05d44)](https://www.npmjs.com/package/@kahme247/ompweb)
 [![node version](https://img.shields.io/node/v/@kahme247/ompweb.svg?logo=node.js&color=44cc11)](https://nodejs.org)
