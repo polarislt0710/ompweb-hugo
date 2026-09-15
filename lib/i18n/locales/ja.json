@@ -1511,6 +1511,7 @@
   "askGrill.defaultTitle": "質問があります",
   "askGrill.recommended": "おすすめ",
   "askGrill.somethingElse": "その他",
+  "askGrill.multiHint": "複数選択できます",
   "askGrill.customPlaceholder": "自分の回答を入力",
   "askGrill.skip": "スキップ",
   "askGrill.back": "戻る",

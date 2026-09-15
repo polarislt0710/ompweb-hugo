@@ -1502,6 +1502,7 @@
   "askGrill.defaultTitle": "有一個問題想問你",
   "askGrill.recommended": "建議",
   "askGrill.somethingElse": "其他答案",
+  "askGrill.multiHint": "可以揀多過一個",
   "askGrill.customPlaceholder": "輸入你自己的答案",
   "askGrill.skip": "略過",
   "askGrill.back": "上一題",

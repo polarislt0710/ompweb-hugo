@@ -1540,6 +1540,7 @@
   "askGrill.defaultTitle": "A question for you",
   "askGrill.recommended": "Recommended",
   "askGrill.somethingElse": "Something else",
+  "askGrill.multiHint": "Select all that apply",
   "askGrill.customPlaceholder": "Type your own answer",
   "askGrill.skip": "Skip",
   "askGrill.back": "Back",

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import type { ExtensionAskDialogQuestion, ExtensionUiRequest } from "@/lib/types";
-import { encodeAskSubmit, questionHasAnswer } from "@/lib/ask-dialog";
+import { encodeAskSubmit, isAskMulti, isOtherOptionLabel, questionHasAnswer } from "@/lib/ask-dialog";
 import { useModalDialog } from "@/hooks/useModalDialog";
 import { useI18n } from "@/lib/i18n";
 
@@ -25,7 +25,6 @@ export function AskGrillCard({
   const [index, setIndex] = useState(0);
   const [selectedById, setSelectedById] = useState<Record<string, number[]>>({});
   const [customById, setCustomById] = useState<Record<string, string>>({});
-  const [customOpenById, setCustomOpenById] = useState<Record<string, boolean>>({});
   const customInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
@@ -35,13 +34,13 @@ export function AskGrillCard({
       if (
         typeof question.recommended === "number"
         && question.options[question.recommended] !== undefined
+        && !isOtherOptionLabel(question.options[question.recommended]?.label ?? "")
       ) {
         recommended[question.id] = [question.recommended];
       }
     }
     setSelectedById(recommended);
     setCustomById({});
-    setCustomOpenById({});
   }, [request.id]);
 
   const question: ExtensionAskDialogQuestion | undefined = questions[index];
@@ -60,17 +59,26 @@ export function AskGrillCard({
     return null;
   }
 
+  const multi = isAskMulti(question);
+
   const toggleOption = (optionIndex: number) => {
+    const option = question.options[optionIndex];
+    if (option && isOtherOptionLabel(option.label)) {
+      customInputRef.current?.focus();
+      return;
+    }
     setSelectedById((current) => {
       const selected = current[question.id] ?? [];
-      const next = question.multi
+      const next = multi
         ? selected.includes(optionIndex)
           ? selected.filter((item) => item !== optionIndex)
           : [...selected, optionIndex]
         : [optionIndex];
       return { ...current, [question.id]: next };
     });
-    setCustomOpenById((current) => ({ ...current, [question.id]: false }));
+    if (!multi) {
+      setCustomById((current) => ({ ...current, [question.id]: "" }));
+    }
   };
 
   const submitAll = () => {
@@ -87,20 +95,7 @@ export function AskGrillCard({
   };
 
   const selected = selectedById[question.id] ?? [];
-  const customOpen = Boolean(customOpenById[question.id]);
   const customValue = customById[question.id] ?? "";
-
-  useEffect(() => {
-    if (!customOpen) return;
-    customInputRef.current?.focus();
-  }, [customOpen, question.id]);
-
-  const openCustom = () => {
-    setCustomOpenById((current) => ({ ...current, [question.id]: true }));
-    if (!question.multi) {
-      setSelectedById((current) => ({ ...current, [question.id]: [] }));
-    }
-  };
 
   const keepEventsOnCard = (event: KeyboardEvent<HTMLTextAreaElement> | MouseEvent<HTMLTextAreaElement>) => {
     event.stopPropagation();
@@ -134,6 +129,9 @@ export function AskGrillCard({
           position: "relative",
           zIndex: 2,
           width: attached ? "100%" : "min(560px, 100%)",
+          maxHeight: attached ? "min(480px, 55dvh)" : "min(640px, calc(100dvh - 40px))",
+          display: "flex",
+          flexDirection: "column",
           border: "1px solid var(--border)",
           borderRadius: attached ? "var(--radius-card)" : "var(--radius-modal)",
           background: "var(--bg)",
@@ -142,7 +140,7 @@ export function AskGrillCard({
           outline: "none",
         }}
       >
-        <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid var(--border)" }}>
+        <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
             <div style={{ color: "var(--text)", fontSize: 15, fontWeight: 650, lineHeight: 1.35 }}>
               {question.header || t("askGrill.defaultTitle")}
@@ -156,18 +154,29 @@ export function AskGrillCard({
           <div style={{ marginTop: 6, color: "var(--text-muted)", fontSize: 13, lineHeight: 1.5 }}>
             {question.question}
           </div>
+          {multi ? (
+            <div style={{ marginTop: 6, color: "var(--accent)", fontSize: 11, fontWeight: 600 }}>
+              {t("askGrill.multiHint")}
+            </div>
+          ) : null}
         </div>
 
-        <div style={{ padding: 14, display: "grid", gap: 8 }}>
+        <div
+          role={multi ? "group" : "radiogroup"}
+          aria-label={question.question}
+          style={{ padding: 14, display: "grid", gap: 8, minHeight: 0, overflowY: "auto", flex: 1 }}
+        >
           {question.options.map((option, optionIndex) => {
+            if (isOtherOptionLabel(option.label)) return null;
             const isOn = selected.includes(optionIndex);
             const recommended = question.recommended === optionIndex;
             return (
               <button
                 key={`${question.id}-${optionIndex}`}
                 type="button"
+                role={multi ? "checkbox" : "radio"}
+                aria-checked={isOn}
                 onClick={() => toggleOption(optionIndex)}
-                aria-pressed={isOn}
                 style={{
                   width: "100%",
                   padding: "10px 12px",
@@ -182,22 +191,29 @@ export function AskGrillCard({
                 }}
               >
                 <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                  <span style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: 999,
-                    border: `1px solid ${isOn ? "var(--accent)" : "var(--border)"}`,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 11,
-                    fontFamily: "var(--font-mono)",
-                    flexShrink: 0,
-                    background: isOn ? "var(--accent)" : "transparent",
-                    color: isOn ? "var(--on-accent)" : "var(--text-muted)",
-                  }}
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      width: 18,
+                      height: 18,
+                      marginTop: 2,
+                      borderRadius: multi ? 4 : 999,
+                      border: `1px solid ${isOn ? "var(--accent)" : "var(--border)"}`,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                      background: isOn ? "var(--accent)" : "transparent",
+                      color: isOn ? "var(--on-accent)" : "transparent",
+                    }}
                   >
-                    {optionIndex + 1}
+                    {multi ? (
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="2 5.2 4.1 7.2 8 2.8" />
+                      </svg>
+                    ) : (
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor" }} />
+                    )}
                   </span>
                   <span style={{ display: "grid", gap: 2 }}>
                     <span style={{ fontSize: 13, fontWeight: 600 }}>
@@ -213,34 +229,25 @@ export function AskGrillCard({
                         {option.description}
                       </span>
                     ) : null}
+                    {isOn && option.preview ? (
+                      <span style={{ marginTop: 6, padding: "7px 8px", borderLeft: "2px solid var(--accent)", background: "var(--bg-subtle)", color: "var(--text-muted)", fontSize: 11, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+                        {option.preview}
+                      </span>
+                    ) : null}
                   </span>
                 </div>
               </button>
             );
           })}
+        </div>
 
-          <button
-            type="button"
-            onClick={openCustom}
-            aria-pressed={customOpen}
-            style={{
-              width: "100%",
-              padding: "10px 12px",
-              borderRadius: 10,
-              border: `1px dashed ${customOpen ? "var(--accent)" : "var(--border)"}`,
-              background: customOpen ? "color-mix(in srgb, var(--accent) 8%, var(--bg))" : "transparent",
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              textAlign: "left",
-              fontSize: 13,
-            }}
-          >
-            {t("askGrill.somethingElse")}
-          </button>
-          {customOpen && (
+        <div style={{ padding: "0 14px 12px", flexShrink: 0 }}>
+          <label style={{ display: "grid", gap: 6 }}>
+            <span style={{ color: "var(--text-muted)", fontSize: 12, fontWeight: 600 }}>
+              {t("askGrill.somethingElse")}
+            </span>
             <textarea
               ref={customInputRef}
-              autoFocus
               aria-label={t("askGrill.somethingElse")}
               value={customValue}
               placeholder={t("askGrill.customPlaceholder")}
@@ -250,6 +257,9 @@ export function AskGrillCard({
               onChange={(event) => {
                 const next = event.target.value;
                 setCustomById((current) => ({ ...current, [question.id]: next }));
+                if (!multi && next.trim()) {
+                  setSelectedById((current) => ({ ...current, [question.id]: [] }));
+                }
               }}
               style={{
                 width: "100%",
@@ -265,7 +275,7 @@ export function AskGrillCard({
                 lineHeight: 1.5,
               }}
             />
-          )}
+          </label>
         </div>
 
         <div style={{
@@ -275,6 +285,7 @@ export function AskGrillCard({
           padding: "10px 14px",
           borderTop: "1px solid var(--border)",
           background: "var(--bg-panel)",
+          flexShrink: 0,
         }}
         >
           <button
