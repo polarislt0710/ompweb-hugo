@@ -5,6 +5,7 @@ import type { ExtensionUiRequest } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
 import { useModalDialog } from "@/hooks/useModalDialog";
 import { AskGrillCard } from "./AskGrillCard";
+import { SelectAskCard } from "./SelectAskCard";
 
 export type ExtensionDialogRequest = Extract<
   ExtensionUiRequest,
@@ -38,16 +39,24 @@ export function ExtensionDialog({
 }) {
   const { t } = useI18n();
   const [value, setValue] = useState(request.method === "editor" ? request.prefill ?? "" : "");
-  const [selectedOption, setSelectedOption] = useState<string | null>(null);
 
   useEffect(() => {
     setValue(request.method === "editor" ? request.prefill ?? "" : "");
-    setSelectedOption(null);
   }, [request]);
 
   if (request.method === "ask") {
     return (
       <AskGrillCard
+        request={request}
+        onRespond={onRespond}
+        attached={attached}
+      />
+    );
+  }
+
+  if (request.method === "select") {
+    return (
+      <SelectAskCard
         request={request}
         onRespond={onRespond}
         attached={attached}
@@ -68,8 +77,6 @@ export function ExtensionDialog({
   const submitValue = () => {
     if (request.method === "confirm") {
       onRespond(request, { confirmed: true });
-    } else if (request.method === "select") {
-      if (selectedOption) onRespond(request, { value: selectedOption });
     } else {
       onRespond(request, { value });
     }
@@ -123,36 +130,6 @@ export function ExtensionDialog({
         <div style={{ padding: 14 }}>
           {request.method === "confirm" && (
             <div style={{ color: "var(--text-muted)", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{request.message}</div>
-          )}
-          {request.method === "select" && (
-            <div style={{ display: "grid", gap: 8 }}>
-              {request.options.map((option) => {
-                const selected = selectedOption === option;
-                return (
-                  <button
-                    key={option}
-                    onClick={() => attached ? setSelectedOption(option) : onRespond(request, { value: option })}
-                    aria-pressed={attached ? selected : undefined}
-                    style={{
-                      width: "100%",
-                      padding: "9px 10px",
-                      borderRadius: 7,
-                      border: `1px solid ${selected ? "var(--accent)" : "var(--border)"}`,
-                      background: selected ? "color-mix(in srgb, var(--accent) 10%, var(--bg-panel))" : "var(--bg-panel)",
-                      color: "var(--text)",
-                      cursor: "pointer",
-                      textAlign: "left",
-                      fontSize: 13,
-                      transition: attached ? undefined : "background-color var(--dur-fast) var(--ease-out-warm), border-color var(--dur-fast) var(--ease-out-warm)",
-                    }}
-                    onMouseEnter={attached ? undefined : (e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
-                    onMouseLeave={attached ? undefined : (e) => { e.currentTarget.style.background = "var(--bg-panel)"; }}
-                  >
-                    {option}
-                  </button>
-                );
-              })}
-            </div>
           )}
           {request.method === "input" && (
             <input
@@ -239,23 +216,7 @@ export function ExtensionDialog({
             >
               {t("chatWindow.confirm")}
             </button>
-          ) : request.method === "select" && attached ? (
-            <button
-              onClick={submitValue}
-              disabled={!selectedOption}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 6,
-                border: "1px solid var(--accent-strong)",
-                background: selectedOption ? "var(--accent-strong)" : "var(--bg-subtle)",
-                color: selectedOption ? "var(--on-accent)" : "var(--text-dim)",
-                cursor: selectedOption ? "pointer" : "not-allowed",
-                opacity: selectedOption ? 1 : 0.65,
-              }}
-            >
-              {t("chatWindow.next")}
-            </button>
-          ) : request.method !== "select" ? (
+          ) : (
             <button
               onClick={submitValue}
               style={{
@@ -272,7 +233,7 @@ export function ExtensionDialog({
             >
               {t("chatWindow.submit")}
             </button>
-          ) : null}
+          )}
         </div>
       </div>
     </div>

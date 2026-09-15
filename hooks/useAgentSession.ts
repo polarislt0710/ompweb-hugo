@@ -15,6 +15,7 @@ import type { ThinkingModelMeta } from "@/lib/thinking-levels";
 import { clampThinkingLevel, resolveAvailableThinkingLevels } from "@/lib/thinking-levels";
 import { sendAgentCommand, setSessionAdvisorSpawn } from "@/lib/agent-client";
 import { translate } from "@/lib/i18n";
+import { takeAskSelectCustom } from "@/lib/ask-dialog";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { createMessageUpdateCoalescer, type MessageUpdateCoalescer } from "@/lib/message-update-coalescer";
 import { createReconcileGuard, type ReconcileGuard } from "@/lib/reconcile-guard";
@@ -1290,7 +1291,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       case "select":
       case "confirm":
       case "input":
-      case "editor":
       case "ask":
         if (extensionDialogClearTimerRef.current) {
           clearTimeout(extensionDialogClearTimerRef.current);
@@ -1298,6 +1298,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
         setExtensionDialog(request);
         break;
+      case "editor": {
+        if (extensionDialogClearTimerRef.current) {
+          clearTimeout(extensionDialogClearTimerRef.current);
+          extensionDialogClearTimerRef.current = null;
+        }
+        const custom = takeAskSelectCustom();
+        if (custom !== null) {
+          setExtensionDialog(null);
+          void respondToExtensionUi(request as ExtensionUiDialogRequest, { value: custom });
+          break;
+        }
+        setExtensionDialog(request);
+        break;
+      }
       case "cancel":
         setExtensionDialog((current) => current?.id === request.targetId ? null : current);
         break;
@@ -1362,7 +1376,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         });
         break;
     }
-  }, [addNotice, opts.chatInputRef]);
+  }, [addNotice, opts.chatInputRef, respondToExtensionUi]);
 
   const finishPromptWithoutStream = useCallback(async (sid: string | null = sessionIdRef.current, runId?: number) => {
     clearTerminalReconcileTimer();

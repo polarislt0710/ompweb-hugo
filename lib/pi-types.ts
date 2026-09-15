@@ -174,7 +174,7 @@ export interface SessionStatsInfo {
  * expire stale dialogs.
  */
 export type OmpExtensionUiRequest =
-  | { type: "extension_ui_request"; id: string; method: "select"; title: string; options: string[]; timeout?: number; expiresAt?: number }
+  | { type: "extension_ui_request"; id: string; method: "select"; title: string; options: string[]; optionDetails?: Array<{ description?: string }>; timeout?: number; expiresAt?: number }
   | {
       type: "extension_ui_request";
       id: string;

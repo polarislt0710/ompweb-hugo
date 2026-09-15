@@ -62,3 +62,55 @@ export function questionHasAnswer(
   const custom = customById[question.id]?.trim() ?? "";
   return selected.length > 0 || custom.length > 0;
 }
+
+/** omp rpc-ui has no askDialog, so Ask falls back to select + editor. */
+export const ASK_SELECT_OTHER = "Other (type your own)";
+const SELECTED_COUNT_RE = /^\((\d+) selected\)\s*/i;
+const DONE_SELECTING_RE = /done selecting/i;
+const RECOMMENDED_SUFFIX = " (Recommended)";
+
+export function isAskSelectOtherLabel(label: string): boolean {
+  const normalized = label.trim().replace(/\s+/g, " ");
+  return normalized === ASK_SELECT_OTHER || isOtherOptionLabel(normalized);
+}
+
+export function isAskSelectDoneLabel(label: string): boolean {
+  return DONE_SELECTING_RE.test(label);
+}
+
+export function parseAskSelectTitle(title: string): { question: string; selectedCount: number } {
+  const match = SELECTED_COUNT_RE.exec(title);
+  if (!match) return { question: title, selectedCount: 0 };
+  return {
+    question: title.slice(match[0].length),
+    selectedCount: Number(match[1]),
+  };
+}
+
+export function isAskSelectMulti(title: string, options: readonly string[]): boolean {
+  if (options.some(isAskSelectDoneLabel)) return true;
+  if (parseAskSelectTitle(title).selectedCount > 0) return true;
+  return isAskMulti({ question: parseAskSelectTitle(title).question });
+}
+
+export function stripAskRecommendedSuffix(label: string): { label: string; recommended: boolean } {
+  if (label.endsWith(RECOMMENDED_SUFFIX)) {
+    return { label: label.slice(0, -RECOMMENDED_SUFFIX.length), recommended: true };
+  }
+  return { label, recommended: false };
+}
+
+let stashedAskCustom: { text: string; at: number } | null = null;
+
+export function stashAskSelectCustom(text: string): void {
+  const trimmed = text.trim();
+  stashedAskCustom = trimmed ? { text: trimmed, at: Date.now() } : null;
+}
+
+export function takeAskSelectCustom(maxAgeMs = 8_000): string | null {
+  const pending = stashedAskCustom;
+  stashedAskCustom = null;
+  if (!pending) return null;
+  if (Date.now() - pending.at > maxAgeMs) return null;
+  return pending.text;
+}
