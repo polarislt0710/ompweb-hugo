@@ -1542,6 +1542,7 @@
   "askGrill.somethingElse": "Something else",
   "askGrill.multiHint": "Select all that apply",
   "askGrill.customPlaceholder": "Type your own answer",
+  "askGrill.mentionHint": "Type @1 / @2 to reuse an option, then say what to change.",
   "askGrill.skip": "Skip",
   "askGrill.back": "Back",
   "askGrill.continue": "Continue",

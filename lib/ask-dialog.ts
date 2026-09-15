@@ -114,3 +114,30 @@ export function takeAskSelectCustom(maxAgeMs = 8_000): string | null {
   if (Date.now() - pending.at > maxAgeMs) return null;
   return pending.text;
 }
+
+export function mentionableAskLabels(labels: readonly string[]): string[] {
+  return labels.filter((label) => !isAskSelectOtherLabel(label) && !isAskSelectDoneLabel(label) && !isOtherOptionLabel(label));
+}
+
+const AT_TOKEN_RE = /@\s*(\d+)\b/g;
+
+/** Replace `@1` / `@ 2` with the numbered option text before sending to omp. */
+export function expandAskOptionMentions(text: string, labels: readonly string[]): string {
+  return text.replace(AT_TOKEN_RE, (match, raw) => {
+    const index = Number(raw) - 1;
+    const label = labels[index];
+    if (!label) return match;
+    return `「${raw}. ${stripAskRecommendedSuffix(label).label}」`;
+  });
+}
+
+/** `@` token at the caret for the option mention menu. */
+export function matchAskAtToken(text: string, caret: number): { start: number; query: string } | null {
+  const head = text.slice(0, Math.max(0, caret));
+  const at = head.lastIndexOf("@");
+  if (at < 0) return null;
+  if (at > 0 && /[\w]/.test(head[at - 1] ?? "")) return null;
+  const query = head.slice(at + 1);
+  if (query.includes("\n") || query.length > 24) return null;
+  return { start: at, query };
+}

@@ -1504,6 +1504,7 @@
   "askGrill.somethingElse": "其他答案",
   "askGrill.multiHint": "可以揀多過一個",
   "askGrill.customPlaceholder": "輸入你自己的答案",
+  "askGrill.mentionHint": "打 @1、@2 引用上面嘅選項，再寫你想改嘅部分。",
   "askGrill.skip": "略過",
   "askGrill.back": "上一題",
   "askGrill.continue": "繼續",

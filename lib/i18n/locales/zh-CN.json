@@ -1513,6 +1513,7 @@
   "askGrill.somethingElse": "其他答案",
   "askGrill.multiHint": "可以多选",
   "askGrill.customPlaceholder": "输入你自己的答案",
+  "askGrill.mentionHint": "输入 @1、@2 引用上面的选项，再写你想改的部分。",
   "askGrill.skip": "跳过",
   "askGrill.back": "上一题",
   "askGrill.continue": "继续",

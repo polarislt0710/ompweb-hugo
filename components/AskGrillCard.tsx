@@ -1,10 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ExtensionAskDialogQuestion, ExtensionUiRequest } from "@/lib/types";
-import { encodeAskSubmit, isAskMulti, isOtherOptionLabel, questionHasAnswer } from "@/lib/ask-dialog";
+import {
+  encodeAskSubmit,
+  expandAskOptionMentions,
+  isAskMulti,
+  isOtherOptionLabel,
+  mentionableAskLabels,
+  questionHasAnswer,
+} from "@/lib/ask-dialog";
 import { useModalDialog } from "@/hooks/useModalDialog";
 import { useI18n } from "@/lib/i18n";
+import { AskCustomField } from "./AskCustomField";
 
 type AskRequest = Extract<ExtensionUiRequest, { method: "ask" }>;
 
@@ -25,7 +33,6 @@ export function AskGrillCard({
   const [index, setIndex] = useState(0);
   const [selectedById, setSelectedById] = useState<Record<string, number[]>>({});
   const [customById, setCustomById] = useState<Record<string, string>>({});
-  const customInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     setIndex(0);
@@ -64,7 +71,6 @@ export function AskGrillCard({
   const toggleOption = (optionIndex: number) => {
     const option = question.options[optionIndex];
     if (option && isOtherOptionLabel(option.label)) {
-      customInputRef.current?.focus();
       return;
     }
     setSelectedById((current) => {
@@ -82,7 +88,16 @@ export function AskGrillCard({
   };
 
   const submitAll = () => {
-    onRespond(request, { value: encodeAskSubmit(questions, selectedById, customById) });
+    const expanded: Record<string, string> = {};
+    for (const item of questions) {
+      const raw = customById[item.id];
+      if (!raw) continue;
+      expanded[item.id] = expandAskOptionMentions(
+        raw,
+        mentionableAskLabels(item.options.map((option) => option.label)),
+      );
+    }
+    onRespond(request, { value: encodeAskSubmit(questions, selectedById, expanded) });
   };
 
   const goNext = () => {
@@ -96,10 +111,10 @@ export function AskGrillCard({
 
   const selected = selectedById[question.id] ?? [];
   const customValue = customById[question.id] ?? "";
-
-  const keepEventsOnCard = (event: KeyboardEvent<HTMLTextAreaElement> | MouseEvent<HTMLTextAreaElement>) => {
-    event.stopPropagation();
-  };
+  const mentionLabels = mentionableAskLabels(question.options.map((option) => option.label));
+  const visibleOptions = question.options
+    .map((option, optionIndex) => ({ option, optionIndex }))
+    .filter(({ option }) => !isOtherOptionLabel(option.label));
 
   return (
     <div
@@ -166,8 +181,7 @@ export function AskGrillCard({
           aria-label={question.question}
           style={{ padding: 14, display: "grid", gap: 8, minHeight: 0, overflowY: "auto", flex: 1 }}
         >
-          {question.options.map((option, optionIndex) => {
-            if (isOtherOptionLabel(option.label)) return null;
+          {visibleOptions.map(({ option, optionIndex }, choiceIndex) => {
             const isOn = selected.includes(optionIndex);
             const recommended = question.recommended === optionIndex;
             return (
@@ -217,7 +231,7 @@ export function AskGrillCard({
                   </span>
                   <span style={{ display: "grid", gap: 2 }}>
                     <span style={{ fontSize: 13, fontWeight: 600 }}>
-                      {option.label}
+                      {choiceIndex + 1}. {option.label}
                       {recommended ? (
                         <span style={{ marginLeft: 8, color: "var(--text-dim)", fontWeight: 500, fontSize: 11 }}>
                           {t("askGrill.recommended")}
@@ -242,40 +256,17 @@ export function AskGrillCard({
         </div>
 
         <div style={{ padding: "0 14px 12px", flexShrink: 0 }}>
-          <label style={{ display: "grid", gap: 6 }}>
-            <span style={{ color: "var(--text-muted)", fontSize: 12, fontWeight: 600 }}>
-              {t("askGrill.somethingElse")}
-            </span>
-            <textarea
-              ref={customInputRef}
-              aria-label={t("askGrill.somethingElse")}
-              value={customValue}
-              placeholder={t("askGrill.customPlaceholder")}
-              onMouseDown={keepEventsOnCard}
-              onKeyDown={keepEventsOnCard}
-              onKeyUp={keepEventsOnCard}
-              onChange={(event) => {
-                const next = event.target.value;
-                setCustomById((current) => ({ ...current, [question.id]: next }));
-                if (!multi && next.trim()) {
-                  setSelectedById((current) => ({ ...current, [question.id]: [] }));
-                }
-              }}
-              style={{
-                width: "100%",
-                minHeight: 72,
-                padding: 10,
-                borderRadius: 8,
-                border: "1px solid var(--border)",
-                background: "var(--bg-panel)",
-                color: "var(--text)",
-                outline: "none",
-                resize: "vertical",
-                fontSize: 13,
-                lineHeight: 1.5,
-              }}
-            />
-          </label>
+          <AskCustomField
+            value={customValue}
+            onChange={(next) => {
+              setCustomById((current) => ({ ...current, [question.id]: next }));
+              if (!multi && next.trim()) {
+                setSelectedById((current) => ({ ...current, [question.id]: [] }));
+              }
+            }}
+            labels={mentionLabels}
+            t={t}
+          />
         </div>
 
         <div style={{

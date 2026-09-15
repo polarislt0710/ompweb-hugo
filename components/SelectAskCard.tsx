@@ -1,17 +1,20 @@
 "use client";
 
-import { useEffect, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useState } from "react";
 import type { ExtensionUiRequest } from "@/lib/types";
 import {
   ASK_SELECT_OTHER,
+  expandAskOptionMentions,
   isAskSelectDoneLabel,
   isAskSelectMulti,
   isAskSelectOtherLabel,
+  mentionableAskLabels,
   parseAskSelectTitle,
   stashAskSelectCustom,
   stripAskRecommendedSuffix,
 } from "@/lib/ask-dialog";
 import { useI18n } from "@/lib/i18n";
+import { AskCustomField } from "./AskCustomField";
 
 type SelectRequest = Extract<ExtensionUiRequest, { method: "select" }>;
 
@@ -60,15 +63,13 @@ export function SelectAskCard({
     onRespond(request, { value: label });
   };
 
+  const mentionLabels = mentionableAskLabels(choices.map((choice) => choice.label));
+
   const submitCustom = () => {
     const text = custom.trim();
     if (!text) return;
-    stashAskSelectCustom(text);
+    stashAskSelectCustom(expandAskOptionMentions(text, mentionLabels));
     onRespond(request, { value: otherLabel });
-  };
-
-  const keepEventsOnCard = (event: KeyboardEvent<HTMLTextAreaElement> | MouseEvent<HTMLTextAreaElement>) => {
-    event.stopPropagation();
   };
 
   return (
@@ -127,7 +128,7 @@ export function SelectAskCard({
           aria-label={parsed.question}
           style={{ padding: 14, display: "grid", gap: 8, minHeight: 0, overflowY: "auto", flex: 1 }}
         >
-          {choices.map((option) => {
+          {choices.map((option, choiceIndex) => {
             const display = stripAskRecommendedSuffix(option.label);
             const isOn = multi ? checked.has(option.label) : false;
             return (
@@ -177,7 +178,7 @@ export function SelectAskCard({
                   </span>
                   <span style={{ display: "grid", gap: 2 }}>
                     <span style={{ fontSize: 13, fontWeight: 600 }}>
-                      {display.label}
+                      {choiceIndex + 1}. {display.label}
                       {display.recommended ? (
                         <span style={{ marginLeft: 8, color: "var(--text-dim)", fontWeight: 500, fontSize: 11 }}>
                           {t("askGrill.recommended")}
@@ -197,33 +198,12 @@ export function SelectAskCard({
         </div>
 
         <div style={{ padding: "0 14px 12px", flexShrink: 0 }}>
-          <label style={{ display: "grid", gap: 6 }}>
-            <span style={{ color: "var(--text-muted)", fontSize: 12, fontWeight: 600 }}>
-              {t("askGrill.somethingElse")}
-            </span>
-            <textarea
-              aria-label={t("askGrill.somethingElse")}
-              value={custom}
-              placeholder={t("askGrill.customPlaceholder")}
-              onMouseDown={keepEventsOnCard}
-              onKeyDown={keepEventsOnCard}
-              onKeyUp={keepEventsOnCard}
-              onChange={(event) => setCustom(event.target.value)}
-              style={{
-                width: "100%",
-                minHeight: 72,
-                padding: 10,
-                borderRadius: 8,
-                border: "1px solid var(--border)",
-                background: "var(--bg-panel)",
-                color: "var(--text)",
-                outline: "none",
-                resize: "vertical",
-                fontSize: 13,
-                lineHeight: 1.5,
-              }}
-            />
-          </label>
+          <AskCustomField
+            value={custom}
+            onChange={setCustom}
+            labels={mentionLabels}
+            t={t}
+          />
         </div>
 
         <div style={{

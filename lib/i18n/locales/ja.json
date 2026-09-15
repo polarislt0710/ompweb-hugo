@@ -1513,6 +1513,7 @@
   "askGrill.somethingElse": "その他",
   "askGrill.multiHint": "複数選択できます",
   "askGrill.customPlaceholder": "自分の回答を入力",
+  "askGrill.mentionHint": "@1 / @2 で上の選択肢を引用し、変えたい点を書いてください。",
   "askGrill.skip": "スキップ",
   "askGrill.back": "戻る",
   "askGrill.continue": "続ける",
