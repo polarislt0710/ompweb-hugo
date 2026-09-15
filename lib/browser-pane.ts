@@ -18,6 +18,22 @@ export type BrowserPaneDecision =
 
 export type EmbedPolicy = "allowed" | "blocked" | "unknown";
 
+export type BrowserPaneSurface = "iframe" | "cdp" | "checking" | "fallback";
+
+/** Iframe localhost; everything else uses the experimental Live Chrome screencast. */
+export function browserPaneSurface(
+  decision: BrowserPaneDecision,
+  embedPolicy: EmbedPolicy | "checking",
+): BrowserPaneSurface {
+  if (!decision.ok) return "fallback";
+  if (decision.kind === "loopback") {
+    if (embedPolicy === "checking") return "checking";
+    if (embedPolicy === "allowed") return "iframe";
+    return "cdp";
+  }
+  return "cdp";
+}
+
 export function parseAllowlist(raw: string | null | undefined): string[] {
   if (!raw) return [...DEFAULT_ALLOWLIST_HOSTS];
   try {
