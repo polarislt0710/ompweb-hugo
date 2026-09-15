@@ -1,15 +1,25 @@
 "use client";
 
 import React, { useRef, useState, useCallback, useEffect, useLayoutEffect, useImperativeHandle, forwardRef, memo, KeyboardEvent } from "react";
-import { ChevronDown, ListChecks, Loader2, Mic, Paperclip, Plus, Shrink, Sparkles, Wrench, Zap } from "lucide-react";
+import { ChevronDown, ListChecks, Loader2, Mic, Paperclip, Plus, Shrink, Sparkles, Terminal, Wrench, Zap } from "lucide-react";
 import { ComposerModeBar } from "./ChatInput-composer-modes";
+import { SkillCategoryBar, SkillSuggestionRow } from "./ChatInput-skill-catalog";
+import { ComposerSkillField, type PromptFieldHandle } from "./ChatInput-skill-field";
 import {
-  composerModeSlashLine,
-  readComposerMode,
-  toggleComposerMode,
-  writeComposerMode,
-  type ComposerMode,
-} from "@/lib/composer-modes";
+  catalogSkillFromDiscovered,
+  mergeCatalogSkills,
+  SUGGESTION_IDLE_MS,
+  suggestSkills,
+  type CatalogSkill,
+} from "@/lib/skill-catalog";
+import {
+  allPromptSkillNames,
+  composeSkillPrompt,
+  insertSkillToken,
+  mentionsSkillToken,
+  removeSkillToken,
+} from "@/lib/skill-tokens";
+import { incrementSkillUsage, readSkillUsage, type SkillUsageMap } from "@/lib/skill-usage";
 import {
   applyOutputStyle,
   readOutputStyleId,
@@ -76,7 +86,7 @@ import {
 import { FolderIcon, getFileIcon } from "./FileIcons";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/lib/i18n";
-import { selectableThinkingLevels } from "@/lib/thinking-levels";
+import { clampThinkingLevel, selectableThinkingLevels } from "@/lib/thinking-levels";
 import type { ToolPreset } from "@/lib/tool-presets";
 
 export type { AttachedImage, AttachedTextFile } from "./ChatInput-draft-attachments";
@@ -291,8 +301,11 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   } | null>(null);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
-  const [composerMode, setComposerMode] = useState<ComposerMode>(() => readComposerMode(draftKey));
   const [outputStyleId, setOutputStyleId] = useState<OutputStyleId>(() => readOutputStyleId());
+  const [catalogSkills, setCatalogSkills] = useState<CatalogSkill[]>(() => mergeCatalogSkills([]));
+  const [suggestedSkills, setSuggestedSkills] = useState<CatalogSkill[]>([]);
+  const [armedSuggestion, setArmedSuggestion] = useState<string | null>(null);
+  const [skillUsage, setSkillUsage] = useState<SkillUsageMap>(() => readSkillUsage());
   const [contextOpen, setContextOpen] = useState(false);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [plusExpanded, setPlusExpanded] = useState<"tools" | "advisor" | null>(null);
@@ -318,7 +331,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const [fileIndexLoading, setFileIndexLoading] = useState(false);
   const [atServerResult, setAtServerResult] = useState<{ cwd: string; query: string; matches: FileIndexEntry[] } | null>(null);
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const promptFieldRef = useRef<PromptFieldHandle>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const modelDropdownPanelRef = useRef<HTMLDivElement>(null);
   const modelSearchInputRef = useRef<HTMLInputElement>(null);
@@ -347,31 +360,41 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   const pendingImageCountRef = useRef(0);
   const pendingTextFileCountRef = useRef(0);
   const pendingTextFileBytesRef = useRef(0);
+  const skillUsageRef = useRef(skillUsage);
+  const countedSkillUsesRef = useRef<Set<string>>(new Set());
   valueRef.current = value;
   attachedImagesRef.current = attachedImages;
   attachedTextFilesRef.current = attachedTextFiles;
+  skillUsageRef.current = skillUsage;
+
+  const recordSkillUse = useCallback((names: readonly string[]) => {
+    const fresh: string[] = [];
+    for (const name of names) {
+      const key = name.trim().toLowerCase();
+      if (!key || countedSkillUsesRef.current.has(key)) continue;
+      countedSkillUsesRef.current.add(key);
+      fresh.push(name);
+    }
+    if (fresh.length === 0) return;
+    setSkillUsage(incrementSkillUsage(fresh, skillUsageRef.current));
+  }, []);
 
   const insertTextAtCursor = useCallback((text: string) => {
-    const ta = textareaRef.current;
-    if (!ta) {
-      setValue((v) => v + (v ? " " : "") + text);
-      return;
-    }
-    const start = ta.selectionStart ?? ta.value.length;
-    const end = ta.selectionEnd ?? ta.value.length;
-    const before = ta.value.slice(0, start);
-    const after = ta.value.slice(end);
+    const current = valueRef.current;
+    const start = promptFieldRef.current?.getCaret() ?? current.length;
+    const before = current.slice(0, start);
+    const after = current.slice(start);
     const sep = before.length > 0 && !before.endsWith(" ") ? " " : "";
     const newVal = before + sep + text + after;
     setValue(newVal);
     setAtQuery(null);
     requestAnimationFrame(() => {
-      if (!ta) return;
+      const field = promptFieldRef.current;
+      if (!field) return;
       const pos = start + sep.length + text.length;
-      ta.setSelectionRange(pos, pos);
-      ta.focus();
-      ta.style.height = "auto";
-      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+      field.focus();
+      field.setCaret(pos);
+      field.adjustHeight();
     });
   }, []);
 
@@ -394,36 +417,31 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
   useImperativeHandle(ref, () => ({
     focus() {
-      textareaRef.current?.focus();
+      promptFieldRef.current?.focus();
     },
     insertIfEmpty(text: string) {
-      const ta = textareaRef.current;
-      const current = ta ? ta.value : value;
+      const current = valueRef.current;
       if (current.trim()) return;
       setValue(text);
       setAtQuery(null);
       requestAnimationFrame(() => {
-        if (!ta) return;
-        ta.focus();
-        ta.style.height = "auto";
-        ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+        promptFieldRef.current?.focus();
+        promptFieldRef.current?.setCaret(text.length);
+        promptFieldRef.current?.adjustHeight();
       });
     },
     prependText(text: string) {
       if (!text.trim()) return;
-      const ta = textareaRef.current;
-      const current = ta ? ta.value : value;
+      const current = valueRef.current;
       // Mirrors the TUI's queue restore: queued text first, then whatever
       // the user already typed, separated by a blank line.
       const combined = [text, current].filter((t) => t.trim()).join("\n\n");
       setValue(combined);
       setAtQuery(null);
       requestAnimationFrame(() => {
-        if (!ta) return;
-        ta.focus();
-        ta.setSelectionRange(combined.length, combined.length);
-        ta.style.height = "auto";
-        ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+        promptFieldRef.current?.focus();
+        promptFieldRef.current?.setCaret(combined.length);
+        promptFieldRef.current?.adjustHeight();
       });
     },
     insertText: insertTextAtCursor,
@@ -595,15 +613,16 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     setValue("");
     setAtQuery(null);
     setHistoryMenuOpen(false);
+    setArmedSuggestion(null);
+    setSuggestedSkills([]);
+    countedSkillUsesRef.current = new Set();
     if (draftKey) clearDraft(draftKey);
     if (draftKeyRef.current && draftKeyRef.current !== draftKey) clearDraft(draftKeyRef.current);
     clearImages();
     clearTextFiles();
     // Invalidate any attachment reads still in flight.
     attachmentRevisionRef.current += 1;
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-    }
+    promptFieldRef.current?.adjustHeight();
   }, [clearImages, clearTextFiles, draftKey]);
 
   useLayoutEffect(() => {
@@ -647,10 +666,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }, [draftKey]);
 
   useEffect(() => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    ta.style.height = "auto";
-    if (value) ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+    promptFieldRef.current?.adjustHeight();
   }, [value]);
   useEffect(() => {
     return () => {
@@ -680,42 +696,22 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }, []);
 
   useEffect(() => {
-    writeComposerMode(draftKey, composerMode);
-  }, [draftKey, composerMode]);
-
-  useEffect(() => {
     writeOutputStyleId(outputStyleId);
   }, [outputStyleId]);
 
   const handleSend = useCallback(async () => {
-    const msg = value.trim();
+    const msg = composeSkillPrompt(value).trim();
     if (!msg && !attachedImages.length && !attachedTextFiles.length) return;
     if (isStreaming) return;
     onAudioUnlock?.();
     const composedMessage = composeMessageWithTextAttachments(msg, attachedTextFiles);
-    const modeLine = !msg.startsWith("/") ? composerModeSlashLine(composerMode, composedMessage) : null;
-    if (modeLine && onBuiltinCommand) {
-      const expansion = expandWebSlashCommand(modeLine);
-      const outgoing = expansion.kind === "expand"
-        ? applyOutputStyle(outputStyleId, expansion.prompt)
-        : applyOutputStyle(outputStyleId, composedMessage);
-      if (rejectsOversizedPrompt(outgoing, attachedImages)) return;
-      const sentValue = value;
-      const result = await onBuiltinCommand(modeLine);
-      if (result.handled) {
-        if (!result.error && !result.retainInput && valueRef.current === sentValue) clearInput();
-        return;
-      }
-      onSend(outgoing, attachedImages.length ? attachedImages : undefined);
-      clearInput();
-      return;
-    }
     if (!attachedImages.length && !attachedTextFiles.length && msg.startsWith("/") && onBuiltinCommand) {
       const expansion = expandWebSlashCommand(msg);
       if (expansion.kind === "expand" && rejectsOversizedPrompt(expansion.prompt, attachedImages)) return;
       const sentValue = value;
       const result = await onBuiltinCommand(msg);
       if (result.handled) {
+        if (!result.error) recordSkillUse(allPromptSkillNames(value));
         // The user may have started typing while the command ran; only clear
         // if the composer still holds what was sent.
         if (!result.error && !result.retainInput && valueRef.current === sentValue) clearInput();
@@ -723,9 +719,31 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       }
     }
     if (rejectsOversizedPrompt(composedMessage, attachedImages)) return;
+    recordSkillUse(allPromptSkillNames(value));
     onSend(applyOutputStyle(outputStyleId, composedMessage), attachedImages.length ? attachedImages : undefined);
     clearInput();
-  }, [value, attachedImages, attachedTextFiles, isStreaming, onBuiltinCommand, onSend, clearInput, onAudioUnlock, rejectsOversizedPrompt, composerMode, outputStyleId]);
+  }, [value, attachedImages, attachedTextFiles, isStreaming, onBuiltinCommand, onSend, clearInput, onAudioUnlock, rejectsOversizedPrompt, outputStyleId, recordSkillUse]);
+
+  const handleAntigravityCli = useCallback(async () => {
+    if (isStreaming) return;
+    onAudioUnlock?.();
+    const task = value.trim();
+    const slash = task ? `/agy ${task}` : "/agy";
+    if (onBuiltinCommand) {
+      const sentValue = value;
+      const result = await onBuiltinCommand(slash);
+      if (result.handled) {
+        if (!result.error && !result.retainInput && valueRef.current === sentValue) clearInput();
+        return;
+      }
+    }
+    const expansion = expandWebSlashCommand(slash);
+    if (expansion.kind !== "expand") return;
+    const outgoing = applyOutputStyle(outputStyleId, expansion.prompt);
+    if (rejectsOversizedPrompt(outgoing, attachedImages)) return;
+    onSend(outgoing, attachedImages.length ? attachedImages : undefined);
+    clearInput();
+  }, [value, attachedImages, isStreaming, onBuiltinCommand, onSend, clearInput, onAudioUnlock, rejectsOversizedPrompt, outputStyleId]);
 
   const slashQuery = value.startsWith("/") && !/\s/.test(value.slice(1))
     ? value.slice(1).toLowerCase()
@@ -748,6 +766,101 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       .catch(() => {});
     return () => controller.abort();
   }, [cwd, slashQuery]);
+
+  useEffect(() => {
+    if (!cwd) {
+      setCatalogSkills(mergeCatalogSkills([]));
+      return;
+    }
+    const controller = new AbortController();
+    void fetch(`/api/skills?cwd=${encodeURIComponent(cwd)}`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() as Promise<{
+        skills?: Array<{ name?: string; description?: string; disableModelInvocation?: boolean }>;
+      }> : null)
+      .then((data) => {
+        const discovered = (data?.skills ?? []).flatMap((skill) => (
+          skill.name
+            ? [catalogSkillFromDiscovered({
+              name: skill.name,
+              description: skill.description,
+              disableModelInvocation: skill.disableModelInvocation,
+            })]
+            : []
+        ));
+        setCatalogSkills(mergeCatalogSkills(discovered));
+      })
+      .catch(() => {
+        setCatalogSkills(mergeCatalogSkills([]));
+      });
+    return () => controller.abort();
+  }, [cwd]);
+
+  useEffect(() => {
+    setArmedSuggestion(null);
+    setSuggestedSkills([]);
+    countedSkillUsesRef.current = new Set();
+  }, [draftKey]);
+
+  useEffect(() => {
+    if (isStreaming || slashQuery !== null) {
+      setSuggestedSkills([]);
+      return;
+    }
+    const handle = setTimeout(() => {
+      const next = suggestSkills(value, catalogSkills, { usage: skillUsage });
+      setSuggestedSkills(next);
+      setArmedSuggestion((current) => (
+        current && next.some((skill) => skill.name.toLowerCase() === current.toLowerCase())
+          ? current
+          : null
+      ));
+    }, SUGGESTION_IDLE_MS);
+    return () => clearTimeout(handle);
+  }, [value, catalogSkills, isStreaming, slashQuery, skillUsage]);
+
+  const applyPromptValue = useCallback((next: string, caret?: number) => {
+    setValue(next);
+    setArmedSuggestion(null);
+    requestAnimationFrame(() => {
+      const field = promptFieldRef.current;
+      if (!field) return;
+      field.focus();
+      field.setCaret(caret ?? next.length);
+      field.adjustHeight();
+    });
+  }, []);
+
+  const handlePickCatalogSkill = useCallback((skill: CatalogSkill) => {
+    const caret = promptFieldRef.current?.getCaret() ?? valueRef.current.length;
+    const next = insertSkillToken(valueRef.current, skill.name, caret);
+    applyPromptValue(next.text, next.cursor);
+    recordSkillUse([skill.name]);
+  }, [applyPromptValue, recordSkillUse]);
+
+  const handleTogglePinnedSkill = useCallback((skill: CatalogSkill) => {
+    const current = valueRef.current;
+    if (mentionsSkillToken(current, skill.name) || allPromptSkillNames(current).some((name) => name.toLowerCase() === skill.name.toLowerCase())) {
+      applyPromptValue(removeSkillToken(current, skill.name));
+      return;
+    }
+    const caret = promptFieldRef.current?.getCaret() ?? current.length;
+    const next = insertSkillToken(current, skill.name, caret);
+    applyPromptValue(next.text, next.cursor);
+    recordSkillUse([skill.name]);
+  }, [applyPromptValue, recordSkillUse]);
+
+  const handleSuggestionClick = useCallback((skill: CatalogSkill) => {
+    if (armedSuggestion && armedSuggestion.toLowerCase() === skill.name.toLowerCase()) {
+      const caret = promptFieldRef.current?.getCaret() ?? valueRef.current.length;
+      const next = insertSkillToken(valueRef.current, skill.name, caret);
+      applyPromptValue(next.text, next.cursor);
+      recordSkillUse([skill.name]);
+      return;
+    }
+    setArmedSuggestion(skill.name);
+  }, [applyPromptValue, armedSuggestion, recordSkillUse]);
+
+  const pinnedSkillNames = React.useMemo(() => allPromptSkillNames(value), [value]);
 
   const builtinSlashCommands: SlashCommandPaletteItem[] = React.useMemo(
     () => BUILTIN_SLASH_COMMAND_DEFS
@@ -917,8 +1030,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
   const applyAtCompletion = useCallback((entry: FileIndexEntry) => {
     if (!atQuery) return;
-    const ta = textareaRef.current;
-    const cursor = ta?.selectionStart ?? value.length;
+    const cursor = promptFieldRef.current?.getCaret() ?? value.length;
     const before = value.slice(0, atQuery.start);
     let after = value.slice(cursor);
     // Completing inside a quoted token (@"my dir/… with the caret before the
@@ -936,12 +1048,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     // before the caret (token stays open for drill-down into the directory).
     setAtQuery(extractAtQuery(newValue.slice(0, newPos)));
     requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      el.focus();
-      el.setSelectionRange(newPos, newPos);
-      el.style.height = "auto";
-      el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+      promptFieldRef.current?.focus();
+      promptFieldRef.current?.setCaret(newPos);
+      promptFieldRef.current?.adjustHeight();
     });
   }, [atQuery, value]);
 
@@ -981,12 +1090,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     setHistoryActiveIndex(0);
     setAtQuery(null);
     requestAnimationFrame(() => {
-      const ta = textareaRef.current;
-      if (!ta) return;
-      ta.focus();
-      ta.setSelectionRange(text.length, text.length);
-      ta.style.height = "auto";
-      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+      promptFieldRef.current?.focus();
+      promptFieldRef.current?.setCaret(text.length);
+      promptFieldRef.current?.adjustHeight();
     });
   }, []);
 
@@ -996,17 +1102,14 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     setSlashMenuOpen(false);
     setSlashActiveIndex(0);
     requestAnimationFrame(() => {
-      const ta = textareaRef.current;
-      if (!ta) return;
-      ta.focus();
-      ta.setSelectionRange(nextValue.length, nextValue.length);
-      ta.style.height = "auto";
-      ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+      promptFieldRef.current?.focus();
+      promptFieldRef.current?.setCaret(nextValue.length);
+      promptFieldRef.current?.adjustHeight();
     });
   }, []);
 
   const sendQueued = useCallback((mode: "steer" | "followup") => {
-    const msg = value.trim();
+    const msg = composeSkillPrompt(value).trim();
     if (!msg && !attachedImages.length && !attachedTextFiles.length) return;
     if (attachedImages.length || attachedTextFiles.length) return;
     onAudioUnlock?.();
@@ -1027,6 +1130,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       if (expansion.kind === "expand") {
         const prompt = applyOutputStyle(outputStyleId, expansion.prompt);
         if (rejectsOversizedPrompt(prompt, attachedImages)) return;
+        recordSkillUse(allPromptSkillNames(value));
         onPromptWithStreamingBehavior(prompt, streamingBehavior, attachedImages.length ? attachedImages : undefined);
         clearInput();
         return;
@@ -1039,26 +1143,21 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
         return;
       }
       if (rejectsOversizedPrompt(msg, attachedImages)) return;
+      recordSkillUse(allPromptSkillNames(value));
       onPromptWithStreamingBehavior(msg, streamingBehavior, attachedImages.length ? attachedImages : undefined);
       clearInput();
       return;
     }
-    const modeLine = !msg.startsWith("/") ? composerModeSlashLine(composerMode, msg) : null;
-    const queuedText = modeLine
-      ? (() => {
-          const expansion = expandWebSlashCommand(modeLine);
-          return expansion.kind === "expand" ? expansion.prompt : msg;
-        })()
-      : msg;
-    const prompt = applyOutputStyle(outputStyleId, queuedText);
+    const prompt = applyOutputStyle(outputStyleId, msg);
     if (rejectsOversizedPrompt(prompt, attachedImages)) return;
+    recordSkillUse(allPromptSkillNames(value));
     if (mode === "steer" && onSteer) {
       onSteer(prompt, attachedImages.length ? attachedImages : undefined);
     } else if (mode === "followup" && onFollowUp) {
       onFollowUp(prompt, attachedImages.length ? attachedImages : undefined);
     }
     clearInput();
-  }, [value, attachedImages, attachedTextFiles, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock, t, advisorEnabled, rejectsOversizedPrompt, composerMode, outputStyleId]);
+  }, [value, attachedImages, attachedTextFiles, onPromptWithStreamingBehavior, onSteer, onFollowUp, clearInput, onAudioUnlock, t, advisorEnabled, rejectsOversizedPrompt, outputStyleId, recordSkillUse]);
   // A typed, text-only message during a run is a queued follow-up. Keep Stop
   // as the action while the composer is empty or contains attachments.
   const primaryActionQueuesMessage =
@@ -1090,12 +1189,9 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     setAtQuery(null);
     setHistoryMenuOpen(false);
     requestAnimationFrame(() => {
-      const ta = textareaRef.current;
-      if (!ta) return;
-      ta.focus();
-      ta.setSelectionRange(text.length, text.length);
-      ta.style.height = "auto";
-      ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
+      promptFieldRef.current?.focus();
+      promptFieldRef.current?.setCaret(text.length);
+      promptFieldRef.current?.adjustHeight();
     });
   }, [onRemoveQueuedMessage]);
 
@@ -1168,7 +1264,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }, [filteredSlashCommands.length, slashActiveIndex]);
 
   const handleKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    (e: KeyboardEvent<HTMLElement>) => {
       const nativeEvent = e.nativeEvent;
       const recentlyComposed = Date.now() - lastCompositionEndAtRef.current < COMPOSITION_END_ENTER_GRACE_MS;
       const isComposing =
@@ -1321,13 +1417,6 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     [isMobile, isStreaming, onSteer, onFollowUp, onAbort, onMinimize, slashMenuOpen, slashQuery, filteredSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value, isRecording, isTranscribing, cancelDictation, stopDictation, toggleDictation]
   );
 
-  const handleInput = useCallback(() => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
-  }, []);
-
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = Array.from(e.clipboardData?.items ?? []);
     const imageItems = items.filter((item) => item.type.startsWith("image/"));
@@ -1459,6 +1548,12 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
     () => selectableThinkingLevels(availableThinkingLevels),
     [availableThinkingLevels],
   );
+
+  useEffect(() => {
+    if (!onThinkingLevelChange || !availableThinkingLevels) return;
+    const next = clampThinkingLevel(thinkingLevel, availableThinkingLevels);
+    if (next !== (thinkingLevel ?? "auto")) onThinkingLevelChange(next);
+  }, [availableThinkingLevels, onThinkingLevelChange, thinkingLevel]);
   // A run starting mid-interaction must not leave the reasoning menu
   // open: the level only applies to the next prompt, and the trigger is
   // disabled while streaming.
@@ -1489,7 +1584,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       if (plusMenuRef.current && !plusMenuRef.current.contains(e.target as Node)) {
         setPlusMenuOpen(false);
       }
-      if (historyMenuRef.current && !historyMenuRef.current.contains(e.target as Node) && !textareaRef.current?.contains(e.target as Node)) {
+      if (historyMenuRef.current && !historyMenuRef.current.contains(e.target as Node) && !promptFieldRef.current?.getElement()?.contains(e.target as Node)) {
         setHistoryMenuOpen(false);
       }
       if (contextWrapRef.current && !contextWrapRef.current.contains(e.target as Node)) {
@@ -1502,6 +1597,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
 
   return (
     <div
+      className="chat-input-wrap"
       style={{
         flexShrink: 0,
         background: "transparent",
@@ -2291,50 +2387,43 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               transition: "border-color var(--dur-fast) var(--ease-out-warm), background var(--dur-fast) var(--ease-out-warm), box-shadow var(--dur-fast) var(--ease-out-warm)",
             } as React.CSSProperties}
           >
-          <textarea
-            ref={textareaRef}
+          <ComposerSkillField
+            ref={promptFieldRef}
             value={value}
-            onChange={(e) => {
-              setValue(e.target.value);
+            placeholder={t("chatInput.placeholder")}
+            disabled={false}
+            onChange={(next) => {
+              setValue(next);
               setHistoryMenuOpen(false);
-              updateAtQuery(e.target.value, e.target.selectionStart);
+              updateAtQuery(next, promptFieldRef.current?.getCaret() ?? next.length);
             }}
-            onSelect={(e) => {
-              const el = e.currentTarget;
-              updateAtQuery(el.value, el.selectionStart);
-            }}
+            onCaret={(next, caret) => updateAtQuery(next, caret)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             onCompositionStart={() => {
               isComposingRef.current = true;
             }}
-            onCompositionEnd={(e) => {
+            onCompositionEnd={() => {
               isComposingRef.current = false;
               lastCompositionEndAtRef.current = Date.now();
-              const el = e.currentTarget;
-              updateAtQuery(el.value, el.selectionStart);
-            }}
-            onInput={handleInput}
-            onPaste={handlePaste}
-            placeholder={t("chatInput.placeholder")}
-            rows={1}
-            style={{
-              width: "100%",
-              background: "none",
-              border: "none",
-              outline: "none",
-              resize: "none",
-              color: "var(--text)",
-              fontSize: "var(--chat-user-font-size)",
-              lineHeight: "var(--chat-line-height)",
-              fontFamily: "inherit",
-              minHeight: 24,
-              maxHeight: 200,
-              overflow: "auto",
+              const next = valueRef.current;
+              updateAtQuery(next, promptFieldRef.current?.getCaret() ?? next.length);
             }}
           />
 
+          <SkillSuggestionRow
+            skills={catalogSkills}
+            pinnedNames={[]}
+            suggestions={suggestedSkills}
+            armedName={armedSuggestion}
+            isStreaming={isStreaming}
+            onTogglePinned={handleTogglePinnedSkill}
+            onSuggestionClick={handleSuggestionClick}
+            t={t}
+          />
+
           {/* Toolbar: plus menu · model · reasoning · fast · compact · send/queue/stop */}
-          <div style={{
+          <div className="composer-toolbar" style={{
             display: "flex",
             alignItems: "center",
             gap: 2,
@@ -2578,6 +2667,19 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               </div>
             )}
 
+            <button
+              type="button"
+              className="composer-plan-toggle"
+              data-active="false"
+              onClick={() => { void handleAntigravityCli(); }}
+              disabled={isStreaming}
+              title={t("chatInput.agyTitle")}
+              aria-label={t("chatInput.agyLabel")}
+            >
+              <Terminal size={11} strokeWidth={2} aria-hidden="true" />
+              {t("chatInput.agyLabel")}
+            </button>
+
             {/* Thinking selector — compact, expressive, and consistent with models */}
             {onThinkingLevelChange && (
               <div ref={thinkingDropdownRef} style={{ position: "relative" }}>
@@ -2653,9 +2755,16 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
               </div>
             )}
 
+            <SkillCategoryBar
+              skills={catalogSkills}
+              pinnedNames={pinnedSkillNames}
+              usage={skillUsage}
+              isStreaming={isStreaming}
+              onPickSkill={handlePickCatalogSkill}
+              t={t}
+            />
+
             <ComposerModeBar
-              mode={composerMode}
-              onModeChange={(next) => setComposerMode((current) => toggleComposerMode(current, next))}
               outputStyleId={outputStyleId}
               onOutputStyleChange={(id) => {
                 writeOutputStyleId(id);

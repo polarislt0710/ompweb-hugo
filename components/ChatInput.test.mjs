@@ -93,7 +93,7 @@ test("renders goal, planning, and advisor indicators at the composer", () => {
   assert.match(html, /aria-label="(More actions|chatInput\.plusMenu)"/);
 });
 
-test("renders Plan, Flow, Grill, Ask, and the style picker next to thinking", () => {
+test("renders skill category buttons and the style picker next to thinking", () => {
   const html = renderToStaticMarkup(
     React.createElement(ChatInput, {
       onSend() {},
@@ -102,10 +102,11 @@ test("renders Plan, Flow, Grill, Ask, and the style picker next to thinking", ()
     }),
   );
 
-  assert.match(html, /aria-label="(Plan|chatInput\.planLabel)"/);
-  assert.match(html, /aria-label="(Flow|chatInput\.flowLabel)"/);
-  assert.match(html, /aria-label="(Grill|chatInput\.grillLabel)"/);
-  assert.match(html, /aria-label="(Ask|chatInput\.askMattLabel)"/);
+  assert.match(html, /aria-label="(Antigravity CLI|chatInput\.agyLabel)"/);
+  assert.match(html, /aria-label="(Dev|開發|开发|開発|chatInput\.skillCatDev)"/);
+  assert.match(html, /aria-label="(Design|chatInput\.skillCatDesign)"/);
+  assert.match(html, /aria-label="(Daily|日常|chatInput\.skillCatDaily)"/);
+  assert.doesNotMatch(html, /aria-label="(Plan|chatInput\.planLabel)"/);
   assert.match(html, /aria-label="(Style: Default|風格: 日常|chatInput\.styleLabel)/);
 });
 

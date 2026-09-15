@@ -75,6 +75,11 @@ const ADVISOR_PROMPT = (args: string) =>
     ? `Act as an independent advisor reviewing this work: ${args}. Assess the approach, point out risks, gaps, and better alternatives, and give concrete recommendations without changing any code.`
     : `Act as an independent advisor reviewing the current work. Assess the recent changes and overall direction, point out risks, gaps, and better alternatives, and give concrete recommendations without changing any code.`;
 
+const AGY_PROMPT = (args: string) =>
+  args
+    ? `Follow the antigravity-cli skill. Do not implement this yourself and do not use the google-antigravity provider. Delegate via the bash tool to the local official Antigravity CLI (\`agy\`). Label that tool bash, not an official worker.\n\nTask:\n\n${args}`
+    : `Follow the antigravity-cli skill. Do not implement this yourself and do not use the google-antigravity provider. Delegate via the bash tool to the local official Antigravity CLI (\`agy\`) using the current conversation as the task. Label that tool bash, not an official worker.`;
+
 const LOOP_MAX_ATTEMPTS = 10;
 const LOOP_DEFAULT_ATTEMPTS = 3;
 
@@ -183,6 +188,13 @@ export const WEB_SLASH_COMMANDS: readonly WebSlashCommandDef[] = [
     argumentHintKey: "chatInput.cmdLoopArg",
     requiresArgs: true,
     buildPrompt: LOOP_PROMPT,
+  },
+  {
+    name: "agy",
+    descriptionKey: "chatInput.cmdAgy",
+    argumentHintKey: "chatInput.cmdAgyArg",
+    requiresArgs: false,
+    buildPrompt: AGY_PROMPT,
   },
 ];
 const WEB_SLASH_COMMAND_LOOKUP = new Map(WEB_SLASH_COMMANDS.map((command) => [command.name, command]));
