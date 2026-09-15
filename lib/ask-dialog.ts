@@ -119,6 +119,31 @@ export function mentionableAskLabels(labels: readonly string[]): string[] {
   return labels.filter((label) => !isAskSelectOtherLabel(label) && !isAskSelectDoneLabel(label) && !isOtherOptionLabel(label));
 }
 
+const checkedByQuestion = new Map<string, Set<string>>();
+
+export function readAskChecked(question: string): Set<string> {
+  return new Set(checkedByQuestion.get(question) ?? []);
+}
+
+export function writeAskChecked(question: string, checked: Iterable<string>): void {
+  checkedByQuestion.set(question, new Set(checked));
+}
+
+/** Build the Other-box payload for a multi pick so omp receives every choice in one answer. */
+export function composeAskMultiCustom(
+  checkedLabels: readonly string[],
+  allLabels: readonly string[],
+  notes: string,
+): string {
+  const mentionable = mentionableAskLabels(allLabels);
+  const selected = mentionable.flatMap((label, index) => {
+    if (!checkedLabels.includes(label)) return [];
+    return [`「${index + 1}. ${stripAskRecommendedSuffix(label).label}」`];
+  });
+  const extra = expandAskOptionMentions(notes.trim(), mentionable);
+  return [...selected, extra].filter(Boolean).join("\n");
+}
+
 const AT_TOKEN_RE = /@\s*(\d+)\b/g;
 
 /** Replace `@1` / `@ 2` with the numbered option text before sending to omp. */

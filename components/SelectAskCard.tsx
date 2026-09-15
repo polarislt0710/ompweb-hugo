@@ -4,14 +4,17 @@ import { useEffect, useState } from "react";
 import type { ExtensionUiRequest } from "@/lib/types";
 import {
   ASK_SELECT_OTHER,
+  composeAskMultiCustom,
   expandAskOptionMentions,
   isAskSelectDoneLabel,
   isAskSelectMulti,
   isAskSelectOtherLabel,
   mentionableAskLabels,
   parseAskSelectTitle,
+  readAskChecked,
   stashAskSelectCustom,
   stripAskRecommendedSuffix,
+  writeAskChecked,
 } from "@/lib/ask-dialog";
 import { useI18n } from "@/lib/i18n";
 import { AskCustomField } from "./AskCustomField";
@@ -34,43 +37,61 @@ export function SelectAskCard({
   const parsed = parseAskSelectTitle(request.title);
   const multi = isAskSelectMulti(request.title, request.options);
   const otherLabel = request.options.find(isAskSelectOtherLabel) ?? ASK_SELECT_OTHER;
-  const doneLabel = request.options.find(isAskSelectDoneLabel);
   const choices = request.options
     .map((label, index) => ({ label, index, detail: request.optionDetails?.[index] }))
     .filter((option) => !isAskSelectOtherLabel(option.label) && !isAskSelectDoneLabel(option.label));
 
   const [questionKey, setQuestionKey] = useState(parsed.question);
-  const [checked, setChecked] = useState<Set<string>>(() => new Set());
+  const [checked, setChecked] = useState<Set<string>>(() => readAskChecked(parsed.question));
   const [custom, setCustom] = useState("");
 
   useEffect(() => {
     const nextKey = parseAskSelectTitle(request.title).question;
     if (nextKey === questionKey) return;
     setQuestionKey(nextKey);
-    setChecked(new Set());
+    setChecked(readAskChecked(nextKey));
     setCustom("");
   }, [questionKey, request.title]);
 
+  const mentionLabels = mentionableAskLabels(choices.map((choice) => choice.label));
+
+  const toggleChecked = (label: string) => {
+    setChecked((current) => {
+      const next = new Set(current);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      writeAskChecked(questionKey, next);
+      return next;
+    });
+  };
+
   const submitChoice = (label: string) => {
-    if (multi && !isAskSelectDoneLabel(label) && !isAskSelectOtherLabel(label)) {
-      setChecked((current) => {
-        const next = new Set(current);
-        if (next.has(label)) next.delete(label);
-        else next.add(label);
-        return next;
-      });
+    if (multi) {
+      toggleChecked(label);
+      return;
     }
     onRespond(request, { value: label });
   };
 
-  const mentionLabels = mentionableAskLabels(choices.map((choice) => choice.label));
+  const submitMulti = () => {
+    const text = composeAskMultiCustom([...checked], mentionLabels, custom);
+    if (!text) return;
+    stashAskSelectCustom(text);
+    onRespond(request, { value: otherLabel });
+  };
 
   const submitCustom = () => {
+    if (multi) {
+      submitMulti();
+      return;
+    }
     const text = custom.trim();
     if (!text) return;
     stashAskSelectCustom(expandAskOptionMentions(text, mentionLabels));
     onRespond(request, { value: otherLabel });
   };
+
+  const canSubmitMulti = checked.size > 0 || Boolean(custom.trim());
 
   return (
     <div
@@ -231,39 +252,41 @@ export function SelectAskCard({
             {t("askGrill.skip")}
           </button>
           <div style={{ display: "flex", gap: 8 }}>
-            {doneLabel ? (
+            {multi ? (
               <button
                 type="button"
-                onClick={() => submitChoice(doneLabel)}
-                disabled={checked.size === 0 && parsed.selectedCount === 0 && !custom.trim()}
+                onClick={submitMulti}
+                disabled={!canSubmitMulti}
                 style={{
                   padding: "6px 12px",
                   borderRadius: 6,
-                  border: "1px solid var(--border)",
-                  background: "var(--bg)",
-                  color: "var(--text)",
-                  cursor: "pointer",
+                  border: `1px solid ${canSubmitMulti ? "var(--accent-strong)" : "var(--border)"}`,
+                  background: canSubmitMulti ? "var(--accent-strong)" : "var(--bg-subtle)",
+                  color: canSubmitMulti ? "var(--on-accent)" : "var(--text-dim)",
+                  cursor: canSubmitMulti ? "pointer" : "not-allowed",
+                  opacity: canSubmitMulti ? 1 : 0.65,
                 }}
               >
                 {t("askGrill.continue")}
               </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={submitCustom}
-              disabled={!custom.trim()}
-              style={{
-                padding: "6px 12px",
-                borderRadius: 6,
-                border: `1px solid ${custom.trim() ? "var(--accent-strong)" : "var(--border)"}`,
-                background: custom.trim() ? "var(--accent-strong)" : "var(--bg-subtle)",
-                color: custom.trim() ? "var(--on-accent)" : "var(--text-dim)",
-                cursor: custom.trim() ? "pointer" : "not-allowed",
-                opacity: custom.trim() ? 1 : 0.65,
-              }}
-            >
-              {t("askGrill.somethingElse")}
-            </button>
+            ) : (
+              <button
+                type="button"
+                onClick={submitCustom}
+                disabled={!custom.trim()}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  border: `1px solid ${custom.trim() ? "var(--accent-strong)" : "var(--border)"}`,
+                  background: custom.trim() ? "var(--accent-strong)" : "var(--bg-subtle)",
+                  color: custom.trim() ? "var(--on-accent)" : "var(--text-dim)",
+                  cursor: custom.trim() ? "pointer" : "not-allowed",
+                  opacity: custom.trim() ? 1 : 0.65,
+                }}
+              >
+                {t("askGrill.somethingElse")}
+              </button>
+            )}
           </div>
         </div>
       </div>

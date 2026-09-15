@@ -29,7 +29,7 @@ test("rpc select fallback always shows a custom textarea", () => {
   assert.doesNotMatch(html, /Other \(type your own\)/);
 });
 
-test("rpc select fallback uses checkboxes when Done selecting is present", () => {
+test("rpc select fallback keeps a Continue button for multi instead of submitting on each click", () => {
   const html = renderToStaticMarkup(
     React.createElement(SelectAskCard, {
       request: {
@@ -45,4 +45,5 @@ test("rpc select fallback uses checkboxes when Done selecting is present", () =>
   );
   assert.match(html, /role="checkbox"/);
   assert.match(html, /Select all that apply/);
+  assert.match(html, /Continue/);
 });
