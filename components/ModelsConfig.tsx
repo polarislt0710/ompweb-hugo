@@ -5,6 +5,7 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { useI18n } from "@/lib/i18n";
 import { isSafeExternalUrl } from "@/lib/safe-url";
 import { omitUntouchedModelDrafts } from "@/lib/models-config-drafts";
+import { isSearchLoginProvider } from "@/lib/omp/login-provider-kind";
 import { formatApiError } from "@/lib/i18n/api-error";
 import {
   DialogTitle,
@@ -934,9 +935,30 @@ function OAuthDetail({ provider, onRefresh }: { provider: OAuthProvider; onRefre
       {/* Status */}
       <div style={{ minHeight: 48 }}>
         {loginState.phase === "idle" && (
-          <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
-            {provider.loggedIn ? t("modelsConfig.alreadyConnected") : t("modelsConfig.connectAccount", { name: provider.name })}
-          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {isSearchLoginProvider(provider.id) ? (
+              <>
+                <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                  {provider.loggedIn
+                    ? (provider.email
+                      ? t("modelsConfig.searchLoginConnectedAs", { email: provider.email })
+                      : t("modelsConfig.searchLoginConnected"))
+                    : t("modelsConfig.searchLoginConnect", { name: provider.name })}
+                </p>
+                <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                  {t("modelsConfig.searchLoginQuotaHint")}
+                </p>
+              </>
+            ) : (
+              <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
+                {provider.loggedIn
+                  ? (provider.email
+                    ? t("modelsConfig.alreadyConnectedAs", { email: provider.email })
+                    : t("modelsConfig.alreadyConnected"))
+                  : t("modelsConfig.connectAccount", { name: provider.name })}
+              </p>
+            )}
+          </div>
         )}
         {loginState.phase === "connecting" && (
           <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted)" }}>{t("modelsConfig.openingBrowser")}</p>
@@ -1413,7 +1435,7 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, embedded = false }
           {!runtimeModelsLoading && connectedProviders.filter((provider) => !runtimeModelsByProvider[provider.id]).map((provider) => (
             <section key={provider.id} style={{ border: "1px dashed var(--border)", borderRadius: "var(--radius-card)", padding: 14, background: "var(--bg-panel)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text)", fontSize: 12, fontWeight: 600 }}><ProviderIcon id={provider.id} size={15} />{provider.name}</div>
-              <p style={{ margin: "8px 0 0", color: "var(--text-muted)", fontSize: 12, lineHeight: 1.5 }}>{provider.disabled ? t("modelsConfig.connectedDisabledDesc") : t("modelsConfig.connectedNoModelsDesc")}</p>
+              <p style={{ margin: "8px 0 0", color: "var(--text-muted)", fontSize: 12, lineHeight: 1.5 }}>{provider.disabled ? t("modelsConfig.connectedDisabledDesc") : isSearchLoginProvider(provider.id) ? t("modelsConfig.connectedSearchOnlyDesc") : t("modelsConfig.connectedNoModelsDesc")}</p>
               {provider.disabled && <button type="button" onClick={() => void enableConnectedProvider(provider.id).catch((error) => toast.error(t("modelsConfig.couldNotEnableProvider"), error instanceof Error ? error.message : String(error)))} style={{ marginTop: 10, padding: "6px 10px", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", background: "var(--bg)", color: "var(--text)", cursor: "pointer", fontSize: 12 }}>{t("modelsConfig.enableInOmp")}</button>}
             </section>
           ))}
@@ -1562,7 +1584,7 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, embedded = false }
                                     <ProviderIcon id={p.id} size={28} />
                                     <div>
                                       <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text)" }}>{p.name}</div>
-                                      <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>{p.id}</div>
+                                      <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>{p.email ?? p.id}</div>
                                     </div>
                                   </div>
                                   <span className="settings-badge ok" style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", fontSize: 11 }}>
@@ -1585,14 +1607,20 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, embedded = false }
                                   </div>
                                 ) : (
                                   <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 10 }}>
-                                    OAuth authenticated
+                                    {isSearchLoginProvider(p.id)
+                                      ? t("modelsConfig.searchLoginBadge")
+                                      : t("modelsConfig.oauthAuthenticated")}
                                   </div>
                                 )}
                               </div>
 
                               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
                                 <span style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
-                                  {models.length > 0 ? `${models.length} active models` : "Ready to use"}
+                                  {models.length > 0
+                                    ? `${models.length} active models`
+                                    : isSearchLoginProvider(p.id)
+                                      ? t("modelsConfig.searchLoginReady")
+                                      : t("modelsConfig.readyToUse")}
                                 </span>
                                 <button
                                   type="button"
@@ -1733,7 +1761,7 @@ export function ModelsConfig({ onClose, onSelectTab, onSaved, embedded = false }
                                   <ProviderIcon id={p.id} size={24} />
                                   <div>
                                     <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{p.name}</div>
-                                    <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>{p.id}</div>
+                                    <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>{isSearchLoginProvider(p.id) ? t("modelsConfig.searchLoginBadge") : p.id}</div>
                                   </div>
                                 </div>
                                 <button

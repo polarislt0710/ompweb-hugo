@@ -20,6 +20,11 @@ export interface ThinkingModelMeta {
 }
 
 const DEFAULT_THINKING_LEVELS = ["auto", "off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+const OFF_ALIASES = new Set(["off", "none"]);
+
+function isOffAlias(level: string): boolean {
+  return OFF_ALIASES.has(level);
+}
 
 /** Keep familiar levels ordered while preserving provider-defined additions. */
 export function selectableThinkingLevels(available: readonly string[] | null | undefined): string[] {
@@ -30,10 +35,39 @@ export function selectableThinkingLevels(available: readonly string[] | null | u
   return [...ordered, ...remaining];
 }
 
-/** "off" is always a valid selector; concrete efforts come from the model. */
+/**
+ * Ladder omp actually supports for this model.
+ * Do not invent `off`: GPT-6 Astra (and other Codex reasoning models) reject
+ * `none`, which is what omp sends for UI `off`.
+ */
 export function thinkingLevelsForMeta(meta: ThinkingModelMeta): string[] {
   if (!meta.reasoning) return ["off"];
-  return ["off", ...(meta.thinking?.efforts ?? [])];
+  const efforts = (meta.thinking?.efforts ?? []).filter((level) => level && level !== "auto");
+  const hasOff = efforts.some(isOffAlias);
+  const concrete = efforts.filter((level) => !isOffAlias(level));
+  return hasOff ? ["off", ...concrete] : concrete;
+}
+
+/** Map provider `none` onto the UI's `off` label. */
+export function canonicalizeThinkingLevel(level: string | undefined): string {
+  if (!level || level === "inherit") return "auto";
+  return isOffAlias(level) ? "off" : level;
+}
+
+/** If `level` is not on this model's ladder, drop to the lowest real effort. */
+export function clampThinkingLevel(
+  level: string | undefined,
+  available: readonly string[] | null | undefined,
+): string {
+  const normalized = canonicalizeThinkingLevel(level);
+  if (normalized === "auto") return "auto";
+  if (available == null || available.length === 0) {
+    // Unknown ladder: never send off/none — GPT-6 Astra rejects `none`.
+    return normalized === "off" ? "auto" : normalized;
+  }
+  const options = selectableThinkingLevels(available);
+  if (options.includes(normalized)) return normalized;
+  return options.find((item) => item !== "auto") ?? "auto";
 }
 
 /**

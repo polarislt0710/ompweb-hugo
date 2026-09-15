@@ -82,10 +82,55 @@ export function MarkdownBody({ children, className, isStreaming, cwd, sessionId,
         return false;
       });
 
+    const hrefRendersMedia = (href: unknown): boolean => {
+      if (typeof href !== "string") return false;
+      const filePath = resolveLocalFileHref(href, cwd);
+      return Boolean(filePath && mediaKind(filePath));
+    };
+    const srcRendersMedia = (src: unknown): boolean => {
+      if (typeof src !== "string") return false;
+      const filePath = resolveLocalFileHref(src, cwd);
+      return mediaKind(filePath ?? "") === "image";
+    };
+    // react-markdown gives <p> the custom <a>/<img> elements, not the
+    // MediaAttachment those renderers return. Inspect href/src so a media
+    // preview never hydrates as <p><div>.
+    const isBlockMarkdownChild = (child: ReactNode): boolean => {
+      if (!isValidElement(child)) return false;
+      if (child.type === MediaAttachment) return true;
+      const childProps = child.props as { href?: unknown; src?: unknown; children?: ReactNode };
+      if (hrefRendersMedia(childProps.href) || srcRendersMedia(childProps.src)) return true;
+      if (typeof child.type === "string") {
+        return child.type === "div"
+          || child.type === "pre"
+          || child.type === "table"
+          || child.type === "ul"
+          || child.type === "ol"
+          || child.type === "blockquote"
+          || child.type === "section"
+          || child.type === "figure"
+          || child.type === "video"
+          || child.type === "audio";
+      }
+      return Children.toArray(childProps.children).some(isBlockMarkdownChild);
+    };
+
     return {
     code: markdownCodeRenderer({ isStreaming, inlineClassName: "markdown-inline-code" }),
     pre({ children }) {
       return <>{children}</>;
+    },
+    // MediaAttachment is a block <div>. react-markdown wraps links/images in
+    // <p>, and <p><div> is invalid HTML — it hydrates as a mismatch overlay.
+    p({ children, ...props }) {
+      delete props.node;
+      const block = Children.toArray(children).some(isBlockMarkdownChild);
+      const Tag = block ? "div" : "p";
+      return (
+        <Tag {...props} className={block ? "markdown-block-p" : undefined}>
+          {children}
+        </Tag>
+      );
     },
     a({ href, children, ...props }) {
       // `node` is react-markdown metadata, not a DOM attribute.

@@ -15,11 +15,12 @@ export function LoginForm() {
   }, []);
 
   return (
-    <main style={{ flex: 1, display: "grid", placeItems: "center", padding: 20, background: "var(--bg)", position: "relative" }}>
-      <div style={{ position: "absolute", top: 16, right: 16, zIndex: 400 }}>
+    <main style={{ flex: 1, display: "grid", placeItems: "center", padding: "max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left))", background: "var(--bg)", position: "relative" }}>
+      <div style={{ position: "absolute", top: "max(16px, env(safe-area-inset-top))", right: "max(16px, env(safe-area-inset-right))", zIndex: 400 }}>
         <LanguageSwitcher />
       </div>
       <section
+        className="login-form"
         aria-labelledby="login-title"
         style={{ width: "min(100%, 380px)", padding: "32px", background: "var(--bg-panel)", border: "1px solid var(--border)", borderRadius: "var(--radius-modal)", boxShadow: "var(--shadow-modal)" }}
       >

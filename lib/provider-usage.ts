@@ -25,9 +25,10 @@ function nonEmptyString(value: unknown): string | undefined {
 }
 function normalizeWindowId(scope: Record<string, unknown>, window: Record<string, unknown>): ProviderUsageWindowId | undefined {
   const windowId = nonEmptyString(scope.windowId);
-  if (windowId === "5h" || windowId === "7d" || windowId === "monthly" || windowId === "30d" || windowId === "daily") {
+  if (windowId === "5h" || windowId === "7d" || windowId === "monthly" || windowId === "30d" || windowId === "daily" || windowId === "weekly" || windowId === "1w") {
     if (windowId === "30d") return "monthly";
     if (windowId === "daily") return "5h";
+    if (windowId === "weekly" || windowId === "1w") return "7d";
     return windowId;
   }
   const durationMs = asNumber(window.durationMs);
@@ -72,12 +73,14 @@ export function redactAccountLabel(label: string): string {
   return `${chars.slice(0, Math.min(4, chars.length))}*`;
 }
 
-function compactMeterLabel(tier?: string, modelId?: string): string | undefined {
+function compactMeterLabel(tier?: string, modelId?: string, label?: string): string | undefined {
   const t = tier?.toLowerCase() ?? "";
   const m = modelId?.toLowerCase() ?? "";
   if (t === "spark" || m.includes("spark")) return "Spark";
   if (t === "fable" || m.includes("fable")) return "Fable";
   if (t === "base-model-inference" || m.includes("reserve")) return "Reserve";
+  const fromLabel = label?.match(/\(([^)]+)\)/)?.[1]?.trim();
+  if (fromLabel) return fromLabel;
   return undefined;
 }
 
@@ -98,6 +101,7 @@ type UsageGroup = {
   priority: number;
   modelId?: string;
   tier?: string;
+  meter?: string;
   limits: Map<ProviderUsageWindowId, UsageLimit>;
 };
 
@@ -125,13 +129,15 @@ function normalizeReport(
     const modelId = nonEmptyString(scope.modelId);
     if (activeModelId && modelId && modelId.toLowerCase() !== activeModelId) continue;
     const tier = nonEmptyString(scope.tier);
+    const limitLabel = nonEmptyString(rawLimit.label);
+    const meter = compactMeterLabel(tier, modelId, limitLabel);
     const normalizedModelId = modelId?.toLowerCase();
     const normalizedTier = tier?.toLowerCase();
-    const groupKey = `${normalizedModelId ?? ""}\0${normalizedTier ?? ""}`;
+    const groupKey = `${normalizedModelId ?? ""}\0${normalizedTier ?? ""}\0${meter ?? ""}`;
     const priority = modelId ? (normalizedTier ? 0 : 1) : normalizedTier ? 2 : 3;
     let group = groups.get(groupKey);
     if (!group) {
-      group = { priority, modelId, tier, limits: new Map() };
+      group = { priority, modelId, tier, ...(meter ? { meter } : {}), limits: new Map() };
       groups.set(groupKey, group);
     }
     const candidate = { id: windowId, fraction, window };
@@ -157,7 +163,7 @@ function normalizeReport(
     }];
   }
   return selectedGroups.flatMap((group) => {
-    const meter = compactMeterLabel(group.tier, group.modelId);
+    const meter = group.meter;
     const result: ProviderUsageReport = {
       provider,
       ...(label ? { accountLabel: label } : {}),

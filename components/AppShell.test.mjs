@@ -9,3 +9,8 @@ test("sidebar drag scales pointer deltas by the interface zoom", async () => {
   assert.match(source, /--ui-scale/);
   assert.match(source, /\(ev\.clientX - startX\) \/ uiScale/);
 });
+
+test("interface zoom shrinks the layout box so Settings is not clipped", async () => {
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(css, /calc\(100dvh \/ var\(--ui-scale, 1\)\)/);
+});

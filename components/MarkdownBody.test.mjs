@@ -37,6 +37,14 @@ test("keeps local file markdown links in the app", () => {
   assert.doesNotMatch(html, /target=|rel=|\snode=/);
 });
 
+test("renders local media links as a block, not inside a paragraph", () => {
+  const html = renderMarkdown("[clip](preview.mp4)");
+
+  assert.match(html, /class="markdown-block-p"/);
+  assert.match(html, /<video /);
+  assert.doesNotMatch(html, /<p[ >]/);
+});
+
 test("renders math as plain text until the lazy KaTeX pipeline loads", () => {
   const html = renderMarkdown(String.raw`射线为 \(r_c = K^{-1}p\)。`);
 

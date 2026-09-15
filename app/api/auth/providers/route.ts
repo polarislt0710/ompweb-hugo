@@ -1,3 +1,5 @@
+import { readAuthIdentities } from "@/lib/omp/auth-identities";
+import { loginProviderKind } from "@/lib/omp/login-provider-kind";
 import { type OmpLoginProvider, runUtilityCommand } from "@/lib/omp/rpc-utility";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +21,7 @@ export async function GET() {
         && typeof (provider as OmpLoginProvider).authenticated === "boolean"
       ))
       : [];
+    const identities = readAuthIdentities();
     const result = providers
       .filter((p) => p.available !== false)
       .map((p) => ({
@@ -26,6 +29,8 @@ export async function GET() {
         name: p.name,
         usesCallbackServer: false,
         loggedIn: p.authenticated,
+        kind: loginProviderKind(p.id),
+        email: identities[p.id]?.email,
       }));
     return Response.json({ providers: result });
   } catch (error) {

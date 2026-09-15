@@ -770,12 +770,17 @@ html {
   /* Respect prefers-reduced-motion via the media query at the bottom. */
   scroll-behavior: smooth;
   height: 100%;
+  height: 100dvh;
   overflow: hidden;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 html, body {
   height: 100%;
+  height: 100dvh;
   max-height: 100%;
+  max-height: 100dvh;
   margin: 0;
   padding: 0;
   overflow: hidden;
@@ -784,6 +789,17 @@ html, body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 14px;
   overscroll-behavior: none;
+}
+
+/* CSS zoom on html scales 100dvh, then overflow:hidden clips the sidebar
+   footer (Settings + provider usage). Shrink the layout box by the same
+   factor so the zoomed page still fills the visual viewport. */
+@supports (zoom: 1) {
+  html,
+  html body {
+    height: calc(100dvh / var(--ui-scale, 1));
+    max-height: calc(100dvh / var(--ui-scale, 1));
+  }
 }
 
 /* Thin custom scrollbars (WebKit/Blink). Firefox uses scrollbar-color below. */
@@ -847,8 +863,10 @@ pre, code {
   color: var(--text);
   word-break: break-word;
 }
-.markdown-body p { margin: 0 0 10px; }
-.markdown-body p:last-child { margin-bottom: 0; }
+.markdown-body p,
+.markdown-body .markdown-block-p { margin: 0 0 10px; }
+.markdown-body p:last-child,
+.markdown-body .markdown-block-p:last-child { margin-bottom: 0; }
 .markdown-body h1, .markdown-body h2, .markdown-body h3,
 .markdown-body h4, .markdown-body h5, .markdown-body h6 {
   font-family: var(--font-serif);
@@ -1906,6 +1924,177 @@ pre, code {
   cursor: not-allowed;
   opacity: 0.5;
 }
+.composer-skill-cat-count {
+  font-size: 10px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+.composer-plan-toggle[data-active="true"] .composer-skill-cat-count {
+  color: inherit;
+  opacity: 0.8;
+}
+.composer-skill-suggest-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px dotted color-mix(in srgb, var(--status-error) 55%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--status-error) 5%, transparent);
+}
+.composer-skill-suggest-row[data-suggested="false"] {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.composer-skill-suggest-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--status-error);
+}
+.composer-skill-suggest-row[data-suggested="false"] .composer-skill-suggest-label {
+  color: var(--accent);
+}
+.composer-skill-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    opacity var(--dur-fast) var(--ease-out-warm),
+    background var(--dur-fast) var(--ease-out-warm),
+    border-color var(--dur-fast) var(--ease-out-warm),
+    color var(--dur-fast) var(--ease-out-warm);
+}
+.composer-skill-chip[data-state="suggested"] {
+  opacity: 0.78;
+  color: var(--status-error);
+  border: 1.5px dotted var(--status-error);
+  background: color-mix(in srgb, var(--status-error) 6%, var(--bg));
+}
+.composer-skill-chip[data-state="armed"] {
+  opacity: 1;
+  color: var(--status-error);
+  background: color-mix(in srgb, var(--status-error) 14%, var(--bg));
+  border: 1.5px dotted var(--status-error);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-error) 18%, transparent);
+}
+.composer-skill-chip[data-state="pinned"] {
+  opacity: 1;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-panel));
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+}
+.composer-skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: min(360px, 46vh);
+  padding: 8px;
+  overflow-y: auto;
+}
+.composer-skill-list-empty {
+  padding: 14px 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.composer-skill-list-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.composer-skill-list-item:hover,
+.composer-skill-list-item:focus-visible {
+  background: var(--bg-hover);
+  outline: none;
+}
+.composer-skill-list-item[data-active="true"] {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+}
+.composer-skill-list-name {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+.composer-skill-list-desc {
+  display: -webkit-box;
+  width: 100%;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.35;
+  color: var(--text-muted);
+  white-space: normal;
+}
+.composer-skill-chip:disabled {
+  cursor: not-allowed;
+}
+.composer-skill-chip[data-state="suggested"]:hover:not(:disabled),
+.composer-skill-chip[data-state="armed"]:hover:not(:disabled) {
+  opacity: 1;
+}
+.composer-skill-field {
+  width: 100%;
+  min-height: 24px;
+  max-height: 200px;
+  overflow: auto;
+  background: none;
+  outline: none;
+  color: var(--text);
+  font-size: var(--chat-user-font-size);
+  line-height: var(--chat-line-height);
+  font-family: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.composer-skill-field[data-empty="true"]:before {
+  content: attr(data-placeholder);
+  color: var(--text-dim);
+  pointer-events: none;
+}
+.composer-inline-skill {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  height: 1.45em;
+  margin: 0 0.12em;
+  padding: 0 0.55em;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-panel));
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+  color: var(--accent);
+  font-size: 0.82em;
+  font-weight: 650;
+  line-height: 1;
+  user-select: none;
+}
 @media (prefers-reduced-motion: reduce) {
   .composer-plan-toggle,
   .composer-plan-toggle:hover:not(:disabled) {
@@ -1913,7 +2102,7 @@ pre, code {
     box-shadow: none;
   }
 }
-@media (min-width: 641px) {
+@media (min-width: 1024px) {
   .composer-control-shelf {
     max-width: min(100%, 760px);
     justify-content: flex-end;
@@ -2341,7 +2530,7 @@ span.token.table {
   color: var(--text-dim);
   font-size: 12px;
 }
-@media (max-width: 640px) {
+@media (max-width: 1023px) {
   .picker-nested[data-searching="false"] .picker-nested-models {
     border-left: none;
   }
@@ -2349,11 +2538,10 @@ span.token.table {
     flex: 1 1 auto;
   }
 }
-/* Mobile: the reasoning options become wrapped compact chips instead of a
-   stacked full-width row list — seven 34px rows otherwise eat most of a
-   phone screen. The list is also clamped to the viewport so it can never
-   outgrow it, even with more levels than today's seven. */
-@media (max-width: 640px) {
+/* Compact: the reasoning options become wrapped chips instead of a stacked
+   full-width row list — seven 34px rows otherwise eat most of a phone or
+   iPad portrait screen. */
+@media (max-width: 1023px) {
   .picker-thinking-cards {
     flex-direction: row;
     flex-wrap: wrap;
@@ -2955,7 +3143,7 @@ html.dark .dropdown-surface :is(select, option) {
     flex-wrap: wrap;
     max-width: 100%;
   }
-@media (max-width: 640px) {
+@media (max-width: 1023px) {
   .shell-toolbar-btn {
     width: 40px;
     height: 40px;
@@ -3011,10 +3199,12 @@ html.dark .dropdown-surface :is(select, option) {
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 1023px) {
   .shell-topbar {
     gap: 0 4px !important;
-    padding-right: 48px !important;
+    padding-top: env(safe-area-inset-top);
+    padding-right: 88px !important;
+    min-height: calc(44px + env(safe-area-inset-top));
   }
   .shell-topbar-tools {
     gap: 2px !important;
@@ -3090,6 +3280,15 @@ html.dark .dropdown-surface :is(select, option) {
     padding: 0 6px;
   }
   .shell-metric-pill .shell-pill-extra {
+    display: none !important;
+  }
+  .shell-topbar [data-topbar-right-group] {
+    width: 0 !important;
+    min-width: 0 !important;
+    overflow: hidden;
+    padding-right: 88px !important;
+  }
+  .shell-topbar [data-topbar-session-tools] {
     display: none !important;
   }
 }
@@ -3505,14 +3704,16 @@ html.dark .dropdown-surface :is(select, option) {
   to   { stroke-dashoffset: 0;  opacity: 1; }
 }
 
-/* Desktop sidebar: animate width */
-@media (min-width: 641px) {
+/* Desktop sidebar: animate width. 1024px+ (iPad landscape and up). */
+@media (min-width: 1024px) {
   .sidebar-overlay-backdrop {
     display: none !important;
   }
   .sidebar-container {
     position: relative;
     overflow: hidden;
+    height: 100%;
+    min-height: 0;
     --sidebar-width: 260px;
     transition: width var(--dur-med) var(--ease-out-warm), min-width var(--dur-med) var(--ease-out-warm);
   }
@@ -3529,6 +3730,8 @@ html.dark .dropdown-surface :is(select, option) {
   .sidebar-container > * {
     width: var(--sidebar-width, 260px);
     min-width: var(--sidebar-width, 260px);
+    height: 100%;
+    min-height: 0;
   }
   /* no easing while the user drags the resize handle */
   .sidebar-container.sidebar-resizing {
@@ -3538,7 +3741,7 @@ html.dark .dropdown-surface :is(select, option) {
 
 
 /* Right panel: animate width */
-@media (min-width: 641px) {
+@media (min-width: 1024px) {
   .right-panel-container {
     overflow: hidden;
     transition: width var(--dur-med) var(--ease-out-warm), min-width var(--dur-med) var(--ease-out-warm);
@@ -3564,8 +3767,8 @@ html.dark .dropdown-surface :is(select, option) {
   }
 }
 
-/* Mobile sidebar: slide in/out as overlay */
-@media (max-width: 640px) {
+/* Compact sidebar: slide in/out as overlay on phone, iPad mini, iPad portrait. */
+@media (max-width: 1023px) {
   .chat-stats-center {
     display: none !important;
   }
@@ -3574,8 +3777,11 @@ html.dark .dropdown-surface :is(select, option) {
     top: 0;
     left: 0;
     bottom: 0;
-    width: 280px;
-    max-width: 85vw;
+    width: min(320px, 86vw);
+    max-width: 86vw;
+    padding-top: calc(44px + env(safe-area-inset-top));
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
     transition: transform var(--dur-slow) var(--ease-out-warm), box-shadow var(--dur-slow) var(--ease-out-warm);
   }
   .sidebar-container.sidebar-open {
@@ -3613,5 +3819,67 @@ html.dark .dropdown-surface :is(select, option) {
   .directory-picker-footer {
     flex-wrap: wrap;
     padding-bottom: max(10px, env(safe-area-inset-bottom)) !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .sidebar-container {
+    width: min(280px, 85vw);
+    max-width: 85vw;
+  }
+  .chat-input-wrap {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
+}
+
+/* Compact chrome: phone, iPad mini, iPad portrait. Keep JS (useIsMobile)
+   and these rules on the same 1023px cut. */
+@media (max-width: 1023px) {
+  button,
+  [role="button"],
+  a,
+  summary {
+    touch-action: manipulation;
+  }
+
+  .composer-toolbar {
+    gap: 6px !important;
+    row-gap: 8px !important;
+  }
+  .composer-toolbar > button,
+  .composer-toolbar > div > button {
+    min-height: 40px !important;
+    min-width: 40px;
+  }
+  .composer-plan-toggle {
+    height: 40px;
+    padding: 0 10px;
+    font-size: 13px;
+  }
+  .chat-input-shell textarea {
+    font-size: max(16px, var(--chat-user-font-size));
+  }
+  .minimized-composer-bar {
+    min-height: 44px;
+  }
+  .login-form input {
+    font-size: 16px !important;
+    min-height: 44px;
+    padding: 10px 12px !important;
+  }
+  .login-form button[type="submit"] {
+    min-height: 44px;
+    font-size: 16px;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .composer-toolbar > button,
+  .composer-toolbar > div > button,
+  .composer-plan-toggle,
+  .shell-toolbar-btn,
+  .login-form button[type="submit"] {
+    touch-action: manipulation;
   }
 }

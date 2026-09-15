@@ -1687,6 +1687,7 @@ const MinimizedComposerBar = memo(function MinimizedComposerBar({ draftKey, isSt
     <div style={{ flexShrink: 0, padding: "4px 16px calc(6px + env(safe-area-inset-bottom))" }}>
       <div style={{ maxWidth: CHAT_COLUMN_MAX_WIDTH, margin: "0 auto" }}>
         <div
+          className="minimized-composer-bar"
           style={{
             display: "flex",
             alignItems: "center",

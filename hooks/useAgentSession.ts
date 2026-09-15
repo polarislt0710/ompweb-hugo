@@ -12,6 +12,7 @@ import type {
 } from "@/lib/types";
 import { normalizeToolCalls } from "@/lib/normalize";
 import type { ThinkingModelMeta } from "@/lib/thinking-levels";
+import { clampThinkingLevel, resolveAvailableThinkingLevels } from "@/lib/thinking-levels";
 import { sendAgentCommand, setSessionAdvisorSpawn } from "@/lib/agent-client";
 import { translate } from "@/lib/i18n";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
@@ -65,6 +66,7 @@ import {
   BASH_STATE_RECONCILE_MS,
   EVENT_STREAM_CONNECT_TIMEOUT_MS,
   EVENT_STREAM_SLOW_CONNECT_MS,
+  SESSION_LOAD_TIMEOUT_MS,
   PROGRAMMATIC_SCROLL_IGNORE_MS,
   PROMPT_SETTLE_INITIAL_DELAY_MS,
   PROMPT_SETTLE_MAX_MS,
@@ -234,6 +236,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [toolPreset, setToolPreset] = useState<ToolPreset>("full");
   useEffect(() => { setToolPreset(getPreferredToolPreset()); }, []);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevelOption>("auto");
+  const thinkingLevelRef = useRef(thinkingLevel);
+  thinkingLevelRef.current = thinkingLevel;
   const [fastModeEnabled, setFastModeEnabled] = useState(false);
   const [fastModeActive, setFastModeActive] = useState<boolean | undefined>(undefined);
   // Runtime session modes returned by get_state and changed via RPC
@@ -684,7 +688,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     try {
       if (showLoading) setLoading(true);
       const params = new URLSearchParams({ deferThinking: "1", deferMedia: "1" });
-      const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}?${params}`);
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}?${params}`, {
+        signal: AbortSignal.timeout(SESSION_LOAD_TIMEOUT_MS),
+      });
       if (res.status === 404) {
         if (showLoading) {
           setData(null);
@@ -777,7 +783,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       // watcher, agent_end, bash, compaction) with showLoading=false. A
       // transient failure there must not replace the chat with an error
       // screen — only surface it when the user is actively waiting.
-      if (showLoading) setError(String(e));
+      if (showLoading) {
+        const timedOut = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
+        setError(timedOut ? translate("chatWindow.sessionLoadTimeout") : String(e));
+      }
       else console.warn("Background loadSession failed:", e);
       if (showLoading && includeState) initialHydrationPendingRef.current = false;
       return null;
@@ -844,6 +853,17 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const selectedModel = newSessionModel ?? newSessionDefaultModel;
       if (selectedModel) setPendingModel(selectedModel);
       const toolNames = getToolNamesForPreset(toolPreset);
+      const spawnThinking = selectedModel
+        ? clampThinkingLevel(
+            thinkingLevel,
+            resolveAvailableThinkingLevels(
+              modelThinkingLevels[`${selectedModel.provider}:${selectedModel.modelId}`],
+              selectedModel,
+              null,
+            ),
+          )
+        : thinkingLevel;
+      if (spawnThinking !== thinkingLevel) setThinkingLevel(spawnThinking);
       const res = await fetch("/api/agent/new", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -852,7 +872,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           type: "ensure_session",
           toolNames,
           ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
-          ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
+          ...(spawnThinking !== "auto" ? { thinkingLevel: spawnThinking } : {}),
           ...(advisorEnabled ? { advisor: true } : {}),
         }),
       });
@@ -879,7 +899,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       ensuringNewSessionRef.current = null;
     }
-  }, [advisorEnabled, isNew, newSessionCwd, newSessionModel, newSessionDefaultModel, toolPreset, thinkingLevel]);
+  }, [advisorEnabled, isNew, newSessionCwd, newSessionModel, newSessionDefaultModel, toolPreset, thinkingLevel, modelThinkingLevels]);
 
   // The system panel may initialize a dormant session, but must not create a
   // prompt or model run just to inspect the resolved system prompt.
@@ -2523,14 +2543,36 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     await loadContext(sid, leafId);
   }, [loadContext]);
 
+  const applyThinkingForModel = useCallback(async (sid: string, provider: string, modelId: string) => {
+    const available = resolveAvailableThinkingLevels(
+      modelThinkingLevels[`${provider}:${modelId}`],
+      { provider, modelId },
+      liveModelMeta?.provider === provider && liveModelMeta.modelId === modelId ? liveModelMeta : null,
+    );
+    const next = clampThinkingLevel(thinkingLevelRef.current, available);
+    if (next !== thinkingLevelRef.current) setThinkingLevel(next);
+    if (next === "auto") return;
+    try {
+      await sendAgentCommand(sid, { type: "set_thinking_level", level: next });
+    } catch (error) {
+      console.error("Failed to clamp thinking level for model:", error);
+    }
+  }, [liveModelMeta, modelThinkingLevels]);
+
   const handleModelChange = useCallback(async (provider: string, modelId: string) => {
     if (isNew) {
       setNewSessionModel({ provider, modelId });
       setPendingModel({ provider, modelId });
+      const next = clampThinkingLevel(
+        thinkingLevelRef.current,
+        resolveAvailableThinkingLevels(modelThinkingLevels[`${provider}:${modelId}`], { provider, modelId }, null),
+      );
+      if (next !== thinkingLevelRef.current) setThinkingLevel(next);
       const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
       if (!sid) return;
       try {
         await sendAgentCommand(sid, { type: "set_model", provider, modelId });
+        await applyThinkingForModel(sid, provider, modelId);
       } catch (e) {
         console.error("Failed to set model:", e);
       }
@@ -2541,11 +2583,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     try {
       await sendAgentCommand(sid, { type: "set_model", provider, modelId });
       setCurrentModelOverride({ provider, modelId });
+      await applyThinkingForModel(sid, provider, modelId);
       void refreshLiveModelState(sid);
     } catch (e) {
       console.error("Failed to set model:", e);
     }
-  }, [isNew, setNewSessionModel, refreshLiveModelState]);
+  }, [applyThinkingForModel, isNew, modelThinkingLevels, refreshLiveModelState, setNewSessionModel]);
 
   const handleFastModeChange = useCallback(async (enabled: boolean) => {
     // A brand-new session has no runtime yet: the model picker updates local
@@ -2941,17 +2984,25 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, []);
 
   const handleThinkingLevelChange = useCallback(async (level: ThinkingLevelOption) => {
-    setThinkingLevel(level);
-    if (level === "auto") return; // "auto" leaves pi's current setting untouched
+    const available = displayModel
+      ? resolveAvailableThinkingLevels(
+          modelThinkingLevels[`${displayModel.provider}:${displayModel.modelId}`],
+          displayModel,
+          liveModelMeta,
+        )
+      : null;
+    const next = clampThinkingLevel(level, available);
+    setThinkingLevel(next);
+    if (next === "auto") return; // "auto" leaves pi's current setting untouched
     const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
     if (!sid) return;
     try {
-      await sendAgentCommand(sid, { type: "set_thinking_level", level });
+      await sendAgentCommand(sid, { type: "set_thinking_level", level: next });
       void refreshLiveModelState(sid);
     } catch (e) {
       console.error("Failed to set thinking level:", e);
     }
-  }, [refreshLiveModelState]);
+  }, [displayModel, liveModelMeta, modelThinkingLevels, refreshLiveModelState]);
 
   const handleToolPresetChange = useCallback(async (preset: ToolPreset) => {
     setToolPresetState(preset);
@@ -3002,32 +3053,29 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     completionScrollAllowedRef.current = end.getBoundingClientRect().bottom - container.getBoundingClientRect().bottom <= 24;
   }, []);
 
-  // Load session on mount
-  // React StrictMode re-invokes this effect for the freshly mounted keyed
-  // <ChatWindow> (setup → cleanup → setup), which made every session switch
-  // fetch and commit the whole transcript twice — in dev, the doubled
-  // transcript commit is the dominant cost of switching sessions. Latch on the
-  // session id so one mounted instance loads its session exactly once; the
-  // surviving first invocation still owns the async continuation (SSE attach,
-  // roster hydration), which its cleanup does not tear down.
-  const mountedSessionLoadRef = useRef<string | null>(null);
+  // Load session on mount. Fast Refresh re-runs this effect and used to skip
+  // because a latch survived cleanup while `loading` reset to true — that is
+  // why localhost (`next dev` + HMR) could spin on "Loading session…" while
+  // the public origin (full document load, no HMR) opened the same chat.
+  // StrictMode still double-invokes; the server parse cache coalesces that.
   useEffect(() => {
+    let cancelled = false;
     if (session) {
-      if (mountedSessionLoadRef.current === session.id) return;
-      mountedSessionLoadRef.current = session.id;
-      sessionIdRef.current = session.id;
-      loadSession(session.id, true, true).then((agentState) => {
+      const sid = session.id;
+      sessionIdRef.current = sid;
+      loadSession(sid, true, true).then((agentState) => {
+        if (cancelled || sessionIdRef.current !== sid) return;
         if (agentState?.running) {
           if (agentState.state?.isStreaming || agentState.state?.isPromptRunning) {
             agentRunningRef.current = true;
             setAgentRunning(true);
             setAgentPhase(agentState.state.isStreaming ? { kind: "waiting_model" } : { kind: "running_command" });
             dispatch({ type: "start" });
-            void connectEvents(session.id);
+            void connectEvents(sid);
             // Register the host-tool + URI bridges so the agent can call
             // open_url/notify/open_file and resolve pi-web://clipboard.
-            void registerHostTools(session.id);
-            void registerHostUriSchemes(session.id);
+            void registerHostTools(sid);
+            void registerHostUriSchemes(sid);
             // Rehydrate the live roster (missed lifecycle/progress frames).
             // Tracked + session-guarded: a session switch during the delay must
             // not issue a stale get_subagents against the old session.
@@ -3035,20 +3083,20 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
               clearTimeout(rosterRefreshTimerRef.current);
               rosterRefreshTimerRef.current = null;
             }
-            const rosterTimerSid = session.id;
+            const rosterTimerSid = sid;
             rosterRefreshTimerRef.current = setTimeout(() => {
               rosterRefreshTimerRef.current = null;
               if (sessionIdRef.current !== rosterTimerSid) return;
               void refreshSubagentRoster(rosterTimerSid);
             }, 600);
             if (!agentState.state.isStreaming && agentState.state.isPromptRunning) {
-              void waitForPromptSettlement(session.id);
+              void waitForPromptSettlement(sid);
             }
           }
           if (agentState.state?.isBashRunning) {
             bashRunningRef.current = true;
             setBashRunning(true);
-            void waitForBashSettlement(session.id);
+            void waitForBashSettlement(sid);
           }
         }
         if (agentState?.state) {
@@ -3064,11 +3112,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             setQueuedMessages(EMPTY_QUEUE);
             // The queue drained while the page was closed — a stored copy
             // from a previous page load is stale.
-            clearPersistedQueue(session.id);
+            clearPersistedQueue(sid);
           } else if (typeof agentState.state.queuedMessageCount === "number") {
             // omp still holds queued messages: restore the client-tracked
             // texts persisted by the previous page load.
-            const persisted = readPersistedQueue(session.id);
+            const persisted = readPersistedQueue(sid);
             if (persisted) {
               setQueuedMessages((prev) => (isEmptyQueue(prev) ? persisted : prev));
             }
@@ -3077,6 +3125,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       });
     }
     return () => {
+      cancelled = true;
       clearTerminalReconcileTimer();
       bashRecoveryIdRef.current += 1;
       eventCoalescerRef.current?.reset();
@@ -3098,7 +3147,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       subagentActivityFlushRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshSubagentRoster, registerHostTools, registerHostUriSchemes]);
+  }, [session?.id, refreshSubagentRoster, registerHostTools, registerHostUriSchemes]);
 
   useEffect(() => {
     onSystemPromptChange?.(systemPrompt);

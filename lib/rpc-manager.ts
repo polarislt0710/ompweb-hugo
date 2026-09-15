@@ -46,6 +46,11 @@ const IDLE_DESTROY_MS = 10 * 60 * 1000;
 const READY_TIMEOUT_MS = 120_000;
 const MCP_LIST_TIMEOUT_MS = 15_000;
 const GET_STATE_TIMEOUT_MS = 5_000;
+/** If the browser never answers open_file/open_url/notify, ack anyway so the
+ * agent does not stall while the owner is away from the tab. */
+const HOST_TOOL_ACK_TIMEOUT_MS = 8_000;
+const HOST_URI_ACK_TIMEOUT_MS = 8_000;
+const SKIPPABLE_HOST_TOOLS = new Set(["open_file", "open_url", "notify"]);
 /** Cap on the *acknowledgement* of a prompt frame — not on model execution.
  * omp acks a prompt as soon as it accepts it and the run then reports through
  * events (agent_start/agent_end), so an ack that never arrives means the child
@@ -257,10 +262,12 @@ export class AgentSessionWrapper {
   private hostToolNames: Set<string> = new Set();
   /** host_tool_call ids awaiting a host_tool_result from the browser. */
   private pendingHostTools: Map<string, AgentEvent> = new Map();
+  private hostToolAckTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   /** URI schemes the web UI registered via set_host_uri_schemes. */
   private hostUriSchemes: Map<string, { writable?: boolean }> = new Map();
   /** host_uri_request ids awaiting a host_uri_result from the browser. */
   private pendingHostUris: Map<string, AgentEvent> = new Map();
+  private hostUriAckTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   /** Resolves once an in-flight destroyAndWait finishes; null when idle. Read
    * by startRpcSession so a replacement spawn awaits the old child's exit. */
   destroyPromise: Promise<void> | null = null;
@@ -482,6 +489,7 @@ export class AgentSessionWrapper {
         // will answer.
         if (id && toolName && this.hostToolNames.has(toolName) && this.listeners.length > 0) {
           this.pendingHostTools.set(id, event);
+          this.armHostToolAck(id, toolName);
           this.emit(event);
           notifyRunningChange();
           return;
@@ -511,6 +519,7 @@ export class AgentSessionWrapper {
         const registered = this.hostUriSchemes.get(scheme);
         if (id && scheme && registered && (operation !== "write" || registered.writable) && this.listeners.length > 0) {
           this.pendingHostUris.set(id, event);
+          this.armHostUriAck(id, url);
           this.emit(event);
           notifyRunningChange();
           return;
@@ -635,7 +644,8 @@ export class AgentSessionWrapper {
 
   /** Reject every outstanding host tool call (browser disconnected / destroy). */
   private rejectPendingHostTools(message: string): void {
-    for (const id of this.pendingHostTools.keys()) {
+    for (const id of [...this.pendingHostTools.keys()]) {
+      this.clearHostToolAck(id);
       this.proc.sendFrame({
         type: "host_tool_result",
         id,
@@ -648,7 +658,8 @@ export class AgentSessionWrapper {
 
   /** Reject every outstanding host URI request (browser disconnected / destroy). */
   private rejectPendingHostUris(message: string): void {
-    for (const id of this.pendingHostUris.keys()) {
+    for (const id of [...this.pendingHostUris.keys()]) {
+      this.clearHostUriAck(id);
       this.proc.sendFrame({
         type: "host_uri_result",
         id,
@@ -657,6 +668,64 @@ export class AgentSessionWrapper {
       });
     }
     this.pendingHostUris.clear();
+  }
+
+  private clearHostToolAck(id: string): void {
+    const timer = this.hostToolAckTimers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      this.hostToolAckTimers.delete(id);
+    }
+  }
+
+  private clearHostUriAck(id: string): void {
+    const timer = this.hostUriAckTimers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      this.hostUriAckTimers.delete(id);
+    }
+  }
+
+  private armHostToolAck(id: string, toolName: string): void {
+    this.clearHostToolAck(id);
+    const timer = setTimeout(() => {
+      this.hostToolAckTimers.delete(id);
+      if (!this.pendingHostTools.delete(id)) return;
+      const skip = SKIPPABLE_HOST_TOOLS.has(toolName);
+      this.proc.sendFrame({
+        type: "host_tool_result",
+        id,
+        isError: !skip,
+        result: {
+          content: [{
+            type: "text",
+            text: skip
+              ? `Skipped ${toolName}: the web UI did not answer in time (no attached browser). Continue without waiting for the user to view it.`
+              : `Host tool "${toolName}" timed out waiting for the web UI.`,
+          }],
+        },
+      });
+      this.emit({ type: "notice", level: "warning", message: `Host tool ${toolName} timed out` });
+    }, HOST_TOOL_ACK_TIMEOUT_MS);
+    timer.unref?.();
+    this.hostToolAckTimers.set(id, timer);
+  }
+
+  private armHostUriAck(id: string, url: string): void {
+    this.clearHostUriAck(id);
+    const timer = setTimeout(() => {
+      this.hostUriAckTimers.delete(id);
+      if (!this.pendingHostUris.delete(id)) return;
+      this.proc.sendFrame({
+        type: "host_uri_result",
+        id,
+        isError: true,
+        error: `URI request for ${url} timed out waiting for the web UI. Continue without it.`,
+      });
+      this.emit({ type: "notice", level: "warning", message: `Host URI ${url} timed out` });
+    }, HOST_URI_ACK_TIMEOUT_MS);
+    timer.unref?.();
+    this.hostUriAckTimers.set(id, timer);
   }
 
   private emit(event: AgentEvent): void {
@@ -1091,6 +1160,8 @@ export class AgentSessionWrapper {
 
       case "abort":
         await this.withFinalRunningNotification(async () => {
+          this.rejectPendingHostTools("Aborted: the web UI was not available to open a file or URL.");
+          this.rejectPendingHostUris("Aborted: the web UI was not available for this URI request.");
           await this.proc.sendCommand({ type: "abort" });
           // If the prompt was aborted before the agent loop started, no
           // agent_end will arrive to clear the flag; the streaming flag still
@@ -1256,7 +1327,10 @@ export class AgentSessionWrapper {
       }
 
       case "host_tool_result": {
-        if (typeof command.id === "string") this.pendingHostTools.delete(command.id);
+        if (typeof command.id === "string") {
+          this.clearHostToolAck(command.id);
+          this.pendingHostTools.delete(command.id);
+        }
         await this.proc.sendCommand(command as { type: string });
         return null;
       }
@@ -1274,13 +1348,20 @@ export class AgentSessionWrapper {
       }
 
       case "host_uri_result": {
-        if (typeof command.id === "string") this.pendingHostUris.delete(command.id);
+        if (typeof command.id === "string") {
+          this.clearHostUriAck(command.id);
+          this.pendingHostUris.delete(command.id);
+        }
         await this.proc.sendCommand(command as { type: string });
         return null;
       }
 
       default: {
         if (PASSTHROUGH_COMMANDS.has(type)) {
+          if (type === "abort_and_prompt" || type === "abort_retry") {
+            this.rejectPendingHostTools("Skipped opening a file or URL: continuing the run without a browser tab.");
+            this.rejectPendingHostUris("Skipped a URI request: continuing the run without a browser tab.");
+          }
           const result: unknown = await this.proc.sendCommand(command as { type: string });
           if (type === "set_thinking_level") this.invalidateSessionLists();
           return result ?? null;

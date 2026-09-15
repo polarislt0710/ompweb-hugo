@@ -8,11 +8,15 @@ export type IconComponent = React.ComponentType<{ size?: number | string; style?
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+export type LoginProviderKind = "search" | "models";
+
 export interface OAuthProvider {
   id: string;
   name: string;
   usesCallbackServer: boolean;
   loggedIn: boolean;
+  kind?: LoginProviderKind;
+  email?: string;
 }
 
 export interface ApiKeyProvider {
@@ -96,6 +100,7 @@ export interface ConnectedProvider {
   id: string;
   name: string;
   disabled: boolean;
+  kind?: LoginProviderKind;
 }
 
 export type NativeRegistrySettings = {

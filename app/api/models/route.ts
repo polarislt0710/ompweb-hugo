@@ -1,8 +1,10 @@
 import { statSync } from "fs";
 import { invalidateModelsCache, loadModelsWithCache, withModelRuntimeError, withSafeModelLoadFailure, type ModelsData } from "@/lib/models-cache";
-import { disposeUtilityRpc, runUtilityCommand, type OmpModel } from "@/lib/omp/rpc-utility";
-import { getModelsConfigPath } from "@/lib/omp/paths";
+import { loginProviderKind } from "@/lib/omp/login-provider-kind";
 import { readDisabledProviders } from "@/lib/omp/model-roles";
+import { getModelsConfigPath } from "@/lib/omp/paths";
+import { disposeUtilityRpc, runUtilityCommand, type OmpModel } from "@/lib/omp/rpc-utility";
+import { thinkingLevelsForMeta } from "@/lib/thinking-levels";
 
 export const dynamic = "force-dynamic";
 
@@ -47,11 +49,13 @@ function compareModelEntries(
     || modelNameCollator.compare(a.id, b.id);
 }
 
-// "off" is always a valid selector; the concrete efforts come from the model's
-// baked thinking metadata (omp: getSupportedEfforts = reasoning ? efforts : []).
 function thinkingLevelsFor(model: OmpModel): string[] {
-  if (!model.reasoning) return ["off"];
-  return ["off", ...(model.thinking?.efforts ?? [])];
+  return thinkingLevelsForMeta({
+    provider: model.provider,
+    modelId: model.id,
+    reasoning: model.reasoning,
+    thinking: model.thinking,
+  });
 }
 
 // OMP's /fast maps to a priority service tier. These are the provider families
@@ -98,7 +102,12 @@ async function loadModels(): Promise<ModelsData> {
   const disabledProviders = readDisabledProviders();
   const connectedProviders = loginProviders
     .filter((provider) => provider.authenticated)
-    .map((provider) => ({ id: provider.id, name: provider.name, disabled: disabledProviders.has(provider.id) }));
+    .map((provider) => ({
+      id: provider.id,
+      name: provider.name,
+      disabled: disabledProviders.has(provider.id),
+      kind: loginProviderKind(provider.id),
+    }));
   for (const m of available) {
     const key = `${m.provider}:${m.id}`;
     nameMap.set(key, m.name);

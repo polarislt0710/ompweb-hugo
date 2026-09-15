@@ -174,7 +174,9 @@ export type AgentStateResponse = {
 
 export function normalizeThinkingLevel(level: string | undefined): ThinkingLevelOption {
   // omp's "inherit" sentinel means "no explicit selection" — show as auto.
+  // Provider `none` is the same knob as UI `off`.
   if (!level || level === "inherit") return "auto";
+  if (level === "none") return "off";
   return level as ThinkingLevelOption;
 }
 
@@ -237,6 +239,8 @@ export const BASH_STATE_RECONCILE_MS = 1_000;
 export const EVENT_STREAM_CONNECT_TIMEOUT_MS = 60_000;
 // Tell the user something is happening if the stream is still connecting.
 export const EVENT_STREAM_SLOW_CONNECT_MS = 4_000;
+/** Opening a large live session must not spin "Loading session…" forever. */
+export const SESSION_LOAD_TIMEOUT_MS = 20_000;
 
 export const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " ", "Space", "Spacebar"]);
 export function isQuotaLikeError(text: string): boolean {

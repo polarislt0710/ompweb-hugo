@@ -1331,10 +1331,10 @@ export const SessionSidebar = memo(function SessionSidebar({ selectedSessionId, 
       {/* Workspaces */}
         <div
           style={{
-            flex: "1 1 auto",
+            flex: "1 1 0",
             overflowY: "auto",
             padding: "2px 10px 10px",
-            minHeight: 80,
+            minHeight: 0,
           }}
         >
           {loading && (
@@ -1409,10 +1409,21 @@ export const SessionSidebar = memo(function SessionSidebar({ selectedSessionId, 
           })}
         </div>
 
+      <div
+        className="sidebar-footer"
+        style={{
+          flexShrink: 0,
+          marginTop: "auto",
+          position: "sticky",
+          bottom: 0,
+          background: "var(--bg-panel)",
+          zIndex: 2,
+        }}
+      >
       {/* Provider usage bar — pinned above Settings */}
       {usageVisible && <ProviderUsageBar />}
       {/* Pinned footer: Settings */}
-      <div style={{ borderTop: "1px solid var(--border)", flexShrink: 0 }}>
+      <div style={{ borderTop: "1px solid var(--border)" }}>
         <button
           className="sidebar-settings-row"
           data-active={settingsOpen}
@@ -1452,6 +1463,7 @@ export const SessionSidebar = memo(function SessionSidebar({ selectedSessionId, 
           </span>
           <ChevronRight size={13} strokeWidth={2} style={{ flexShrink: 0, color: "var(--text-dim)" }} aria-hidden="true" />
         </button>
+      </div>
       </div>
     </div>
   );

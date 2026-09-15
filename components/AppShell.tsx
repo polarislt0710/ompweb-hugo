@@ -15,7 +15,7 @@ import { type FileExplorerHandle } from "./FileExplorer";
 import type { RightPanelView } from "./RightPanel";
 import { BranchNavigator } from "./BranchNavigator";
 import { LanguageSwitcher } from "./LanguageSwitcher";
-import { Check, Folder, Globe, History, Menu, PanelLeft, Terminal, Wand2, Zap } from "lucide-react";
+import { Check, Folder, Globe, History, Menu, PanelLeft, Settings2, Terminal, Wand2, Zap } from "lucide-react";
 import { ThemeStudio } from "./ThemeStudio";
 import { translate, useI18n } from "@/lib/i18n";
 import { formatApiError } from "@/lib/i18n/api-error";
@@ -1489,7 +1489,7 @@ export function AppShell() {
           animation: none;
         }
       }
-      @media (max-width: 640px) {
+      @media (max-width: 1023px) {
         .sidebar-overlay-backdrop.sidebar-mobile-pending {
           opacity: 0 !important;
           pointer-events: none !important;
@@ -1500,7 +1500,7 @@ export function AppShell() {
         }
       }
     `}</style>
-    <div style={{ display: "flex", height: "100%", flex: 1, overflow: "hidden", background: "var(--bg)" }}>
+    <div style={{ display: "flex", height: "100%", flex: 1, minHeight: 0, overflow: "hidden", background: "var(--bg)" }}>
       {/* Left sidebar: hidden on full-page Settings */}
       {!settingsTab && (
         <>
@@ -1533,6 +1533,8 @@ export function AppShell() {
           display: "flex",
           flexDirection: "column",
           flexShrink: 0,
+          height: "100%",
+          minHeight: 0,
           zIndex: 200,
           // Desktop-only: the width is user-adjustable via the resize handle.
           ...(!isMobile ? { "--sidebar-width": `${sidebarWidth}px` } : {}),
@@ -1618,8 +1620,18 @@ export function AppShell() {
             </button>
             <ThemeStudio />
             <LanguageSwitcher />
+            {!isMobile && (
+              <button
+                onClick={() => setSettingsTab((prev) => prev ? null : "general")}
+                title={t("chatInput.settings")}
+                aria-label={t("chatInput.settings")}
+                className="shell-toolbar-btn ui-focus-ring"
+              >
+                <Settings2 size={16} strokeWidth={1.8} aria-hidden="true" />
+              </button>
+            )}
             {showChat && (
-              <>
+              <span data-topbar-session-tools style={{ display: "inline-flex", alignItems: "center", gap: "inherit", flexShrink: 0 }}>
                 <div className="shell-toolbar-divider" aria-hidden="true" />
                 <button
                   onClick={handleViewFullHistory}
@@ -1650,7 +1662,7 @@ export function AppShell() {
                 >
                   <Terminal size={16} strokeWidth={1.8} aria-hidden="true" style={{ color: systemPrompt ? "var(--accent)" : undefined }} />
                 </button>
-              </>
+              </span>
             )}
           </div>
 
@@ -1799,7 +1811,7 @@ export function AppShell() {
               height: "100%",
               paddingRight: isMobile ? (rightPanelOpen ? 0 : 88) : rightPanelOpen ? 8 : 72,
               minWidth: 0,
-              width: 200,
+              width: isMobile ? "auto" : 200,
               containerType: "inline-size",
               containerName: "topbar-speed",
               flexShrink: 1,
@@ -2090,7 +2102,7 @@ export function AppShell() {
       title={t("browserPane.localBrowser")}
       aria-label={t("browserPane.localBrowser")}
       style={{
-        position: "fixed", top: 0, right: isMobile ? 44 : 36, zIndex: 300,
+        position: "fixed", top: "env(safe-area-inset-top, 0px)", right: isMobile ? 44 : 36, zIndex: 300,
         display: "flex", alignItems: "center", justifyContent: "center",
         width: isMobile ? 44 : 36, height: isMobile ? 44 : 36, padding: 0,
         background: "var(--bg-panel)", border: "none", borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
@@ -2107,7 +2119,7 @@ export function AppShell() {
       title={rightPanelOpen ? t("appShell.hideFilePanel") : t("appShell.showFilePanel")}
       aria-label={rightPanelOpen ? t("appShell.hideFilePanel") : t("appShell.showFilePanel")}
       style={{
-        position: "fixed", top: 0, right: 0, zIndex: 300,
+        position: "fixed", top: "env(safe-area-inset-top, 0px)", right: 0, zIndex: 300,
         display: "flex", alignItems: "center", justifyContent: "center",
         width: isMobile ? 44 : 36, height: isMobile ? 44 : 36, padding: 0,
         background: "var(--bg-panel)", border: "none", borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
