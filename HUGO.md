@@ -64,6 +64,10 @@ ompweb stop
 
 On this machine the Cloudflare tunnel `com.hugo.ompweb-tunnel` already maps `https://omp.bizobot.com` → `127.0.0.1:30178`. Other people should use Tailscale or their own reverse proxy; do not bind `0.0.0.0` without a password.
 
+## Bundled omp skills
+
+The checkout ships project skills under `.omp/skills/` (`antigravity-cli`, `gcloud`, `google-workspace`, `gpt-image-2.5`). omp discovers that folder when this repo is the session cwd. Copy or edit them to match your machine; they are not a second skill format.
+
 ## Secrets
 
 Never commit `.env.local`. `OMP_WEB_PASSWORD` is the web unlock screen, not an AI login.
