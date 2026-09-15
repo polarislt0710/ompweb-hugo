@@ -35,20 +35,18 @@ A clean, modern web UI for the [oh-my-pi (omp)](https://github.com/can1357/oh-my
 
 ## Quick Start
 
-**Run directly without installing:**
+This fork (includes Hugo's UI changes):
 
 ```bash
-npx @kahme247/ompweb@latest
+git clone https://github.com/polarislt0710/ompweb-hugo.git
+cd ompweb-hugo
+npm install
+npm run dev
 ```
 
-**Or install globally:**
+Open [http://127.0.0.1:30178](http://127.0.0.1:30178). Full notes: [HUGO.md](./HUGO.md).
 
-```bash
-npm install -g @kahme247/ompweb
-ompweb
-```
-
-Open [http://127.0.0.1:30177](http://127.0.0.1:30177) in your browser.
+Stock kahme247 (no fork changes): `npx @kahme247/ompweb@latest` → http://127.0.0.1:30177.
 
 ### CLI Options
 
@@ -150,8 +148,8 @@ password is stored there in plain text).
 ## Development
 
 ```bash
-git clone https://github.com/kahme247/ompweb.git
-cd ompweb
+git clone https://github.com/polarislt0710/ompweb-hugo.git
+cd ompweb-hugo
 npm install
 npm run dev
 ```
