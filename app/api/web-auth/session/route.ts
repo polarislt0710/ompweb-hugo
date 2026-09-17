@@ -3,6 +3,7 @@ import { parseJsonWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-fo
 import { getExternalOrigin } from "@/lib/request-security";
 import {
   createWebSession,
+  safeLoginNext,
   isValidWebPassword,
   isWebPasswordEnabled,
   OMP_WEB_SESSION_COOKIE,
@@ -42,15 +43,15 @@ function attachSessionCookie(response: NextResponse, request: Request): NextResp
   return response;
 }
 
-async function readPassword(request: Request): Promise<string | null> {
+async function readLogin(request: Request): Promise<{ password: string | null; next: string }> {
   const contentType = request.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) {
     const body = await parseJsonWithinLimit(request, MAX_PASSWORD_REQUEST_BYTES) as { password?: unknown };
-    return typeof body.password === "string" ? body.password : null;
+    return { password: typeof body.password === "string" ? body.password : null, next: "/" };
   }
   const form = await request.formData();
   const password = form.get("password");
-  return typeof password === "string" ? password : null;
+  return { password: typeof password === "string" ? password : null, next: safeLoginNext(form.get("next")) };
 }
 
 export async function POST(request: Request) {
@@ -62,8 +63,9 @@ export async function POST(request: Request) {
   const html = wantsBrowserRedirect(request, contentType);
 
   let password: string | null;
+  let next = "/";
   try {
-    password = await readPassword(request);
+    ({ password, next } = await readLogin(request));
   } catch (error) {
     const status = error instanceof RequestBodyTooLargeError ? 413 : 400;
     if (html) return redirectTo(request, "/login?error=1");
@@ -71,10 +73,10 @@ export async function POST(request: Request) {
   }
 
   if (typeof password !== "string" || !isValidWebPassword(password)) {
-    if (html) return redirectTo(request, "/login?error=1");
+    if (html) return redirectTo(request, next === "/" ? "/login?error=1" : `/login?error=1&next=${encodeURIComponent(next)}`);
     return NextResponse.json({ error: "Incorrect password" }, { status: 401 });
   }
 
-  const response = html ? redirectTo(request, "/") : NextResponse.json({ ok: true });
+  const response = html ? redirectTo(request, next) : NextResponse.json({ ok: true });
   return attachSessionCookie(response, request);
 }

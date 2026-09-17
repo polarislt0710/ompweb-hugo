@@ -68,6 +68,61 @@ On this machine the Cloudflare tunnel `com.hugo.ompweb-tunnel` already maps `htt
 
 The checkout ships project skills under `.omp/skills/` (`antigravity-cli`, `gcloud`, `google-workspace`, `gpt-image-2.5`). omp discovers that folder when this repo is the session cwd. Copy or edit them to match your machine; they are not a second skill format.
 
+## Reviewer in ChatGPT, workers in omp
+
+GPT-6 Pro (or any ChatGPT model) reviews the code and writes the ticket plan;
+omp's foreman assigns the tickets to cheap workers and records the results. The
+two sides meet in `.omp/handoff/`:
+
+| File | Written by | Holds |
+|---|---|---|
+| `plan.md` | reviewer | tickets: agent, dependencies, files, verify command |
+| `status.md` | foreman | per-ticket state, files changed, verify output, questions |
+| `decisions.md` | either | decisions and why |
+
+The Handoff tab shows one card with one action, driven by state
+(`components/DispatchSection.tsx`):
+
+1. **派工** (or **批准並派工** when ChatGPT asked) starts a foreman session and
+   opens it in the chat, so the run is watchable. The foreman opens with a
+   three-line read of the plan, then dispatches; it never re-reviews the code,
+   retries a failure once with `worker`, then marks it blocked, and keeps
+   `status.md` current.
+2. While it runs the card shows **睇住執行** (jump back to that session).
+3. When it is done, **交返 GPT 覆核** copies a review prompt and opens ChatGPT;
+   the reviewer reads `status.md` and the diff through the connector and either
+   approves or saves the next round of tickets, which flips the card back to 1.
+
+`lib/work-plan.ts` holds the ticket format and its validation; a ticket's
+`verify` must be able to pass on its own, so a shared test suite belongs on the
+last ticket. Workers are told never to wait on `hub` — a blocking worker that
+asks its parent a question deadlocks the run.
+
+### ChatGPT connector (MCP)
+
+`https://<public host>/mcp` is a Streamable-HTTP MCP server. In ChatGPT:
+Settings → Apps → Developer mode → new app → paste the URL → auth **OAuth**.
+
+- Sign-in is the ompweb password plus an explicit Allow on `/oauth/authorize`;
+  OAuth 2.1 with PKCE, dynamic client registration and CIMD (`lib/mcp/oauth.ts`).
+- Redirect URIs are limited to ChatGPT hosts, so a code cannot be delivered
+  anywhere else. Changing `OMP_WEB_PASSWORD` revokes every connector token, and
+  the Handoff tab has a disconnect button.
+- Tools: list projects, read/search files, git diff, read handoff, write
+  `plan.md`, request a dispatch, message a foreman. No shell, no source edits.
+- Only git repositories share source, and only files `git ls-files` would show
+  (ignored files stay hidden), minus a secret-name denylist. Non-git projects
+  share the handoff notes only.
+- Dispatches and foreman messages wait for approval in the Handoff tab. Set
+  `OMP_WEB_MCP_DIRECT_DISPATCH=1` to let ChatGPT start runs itself.
+- Other env: `OMP_WEB_MCP=off` disables the connector,
+  `OMP_WEB_MCP_BASE_URL` overrides the public URL (defaults to
+  `https://$OMP_WEB_PUBLIC_HOST`), `OMP_WEB_MCP_REDIRECT_HOSTS` adds redirect
+  hosts for local testing.
+
+The connector needs `OMP_WEB_PASSWORD`; without it every `/mcp` and `/oauth`
+route returns 404.
+
 ## Secrets
 
 Never commit `.env.local`. `OMP_WEB_PASSWORD` is the web unlock screen, not an AI login.

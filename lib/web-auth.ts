@@ -37,3 +37,9 @@ export function isValidWebSession(session: string | undefined, password = proces
   const expected = createHmac("sha256", password).update(payload, "utf8").digest("base64url");
   return equal(match[3], expected);
 }
+
+/** Only the ChatGPT connector's consent page may be a post-login destination (no open redirect). */
+export function safeLoginNext(value: unknown): string {
+  if (typeof value !== "string" || !value.startsWith("/oauth/authorize?") || value.includes("\\")) return "/";
+  return value;
+}

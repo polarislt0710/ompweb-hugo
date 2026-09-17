@@ -25,7 +25,7 @@ import { encodeFilePathForApi, getFileName, getRelativeFilePath } from "@/lib/fi
 import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import { getInitialNavigation } from "@/lib/initial-navigation";
 import { comparableProjectPath } from "@/lib/comparable-path";
-import { clearDraft } from "@/lib/draft-store";
+import { clearDraft, getDraft, setDraft } from "@/lib/draft-store";
 import { showCompletionNotification } from "@/lib/browser-notifications";
 import {
   APP_UPDATE_COMPLETED_RELOAD_MS,
@@ -1062,6 +1062,53 @@ export function AppShell() {
     router.replace("/", { scroll: false });
   }, [router, isMobile]);
 
+  const handleInsertHandoffPrompt = useCallback((text: string) => {
+    chatInputRef.current?.insertText(text);
+    if (isMobile) setRightPanelOpen(false);
+  }, [isMobile]);
+
+  // Seed the new session's composer draft (same key ChatWindow uses for an
+  // unsaved session) so the owner reviews the resume prompt before sending.
+  const handleStartHandoffSession = useCallback((cwd: string, prompt: string) => {
+    const draftKey = `new:${cwd}`;
+    const existing = getDraft(draftKey);
+    setDraft(draftKey, {
+      value: existing?.value.trim() ? `${existing.value}\n\n${prompt}` : prompt,
+      images: existing?.images ?? [],
+      files: existing?.files ?? [],
+    });
+    handleNewSession("", cwd);
+    if (isMobile) setRightPanelOpen(false);
+  }, [handleNewSession, isMobile]);
+
+  // A dispatch run spawns its omp session server-side; show it in the chat so
+  // the owner watches the foreman work instead of hunting for it in the sidebar.
+  // The session file appears a beat after the prompt is acked, hence the retries.
+  const handleOpenDispatchRun = useCallback((sessionId: string) => {
+    // Get out of the way first: on a phone the panel covers the chat the run
+    // is about to appear in.
+    if (isMobile) setRightPanelOpen(false);
+    const attempt = async (attemptsLeft: number): Promise<void> => {
+      try {
+        const response = await fetch("/api/sessions");
+        if (response.ok) {
+          const data = (await response.json()) as { sessions?: SessionInfo[] };
+          const found = data.sessions?.find((session) => session.id === sessionId);
+          if (found) {
+            handleSelectSession(found, false);
+            setRefreshKey((key) => key + 1);
+            return;
+          }
+        }
+      } catch {
+        // network error; fall through to the retry
+      }
+      // The session file is written lazily, so it can take a few seconds to show up.
+      if (attemptsLeft > 0) setTimeout(() => void attempt(attemptsLeft - 1), 1000);
+    };
+    void attempt(12);
+  }, [handleSelectSession, isMobile]);
+
   // Global keyboard shortcuts (handles Esc, Ctrl+Alt+N etc.)
   useGlobalKeyboardShortcuts({
     onNewSession: (cwd: string) => handleNewSession(`kb-${Date.now()}`, cwd),
@@ -2084,6 +2131,9 @@ export function AppShell() {
         onRightPanelResizeStart={handleRightPanelResizeStart}
         onRightPanelResizeKey={handleRightPanelResizeKey}
         browserSessionId={selectedSession?.id ?? null}
+        onInsertPrompt={handleInsertHandoffPrompt}
+        onStartHandoffSession={handleStartHandoffSession}
+        onOpenDispatchRun={handleOpenDispatchRun}
       />
       )}
 

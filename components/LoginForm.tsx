@@ -8,10 +8,12 @@ import { useI18n } from "@/lib/i18n";
 export function LoginForm() {
   const { t } = useI18n();
   const [error, setError] = useState(false);
+  const [next, setNext] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setError(params.get("error") === "1");
+    setNext(params.get("next") ?? "");
   }, []);
 
   return (
@@ -30,6 +32,7 @@ export function LoginForm() {
         <h1 id="login-title" className="display-serif" style={{ margin: 0, fontSize: 28, lineHeight: 1.1, color: "var(--text)" }}>{t("loginForm.title")}</h1>
         <p style={{ margin: "10px 0 24px", color: "var(--text-muted)", fontSize: 13, lineHeight: 1.5 }}>{t("loginForm.subtitle")}</p>
         <form method="post" action="/api/web-auth/session" style={{ display: "grid", gap: 14 }}>
+          {next && <input type="hidden" name="next" value={next} />}
           <label htmlFor="web-password" style={{ display: "grid", gap: 6, color: "var(--text-muted)", fontSize: 12, fontWeight: 600 }}>
             {t("loginForm.password")}
             <input

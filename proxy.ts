@@ -14,11 +14,24 @@ function isPublicTunnelOrigin(request: NextRequest): boolean {
   }
 }
 
+function isConnectorPath(pathname: string): boolean {
+  return pathname === "/mcp"
+    || pathname === "/oauth/authorize"
+    || pathname === "/oauth/token"
+    || pathname === "/oauth/register"
+    || pathname === "/.well-known/openid-configuration"
+    || pathname.startsWith("/.well-known/oauth-protected-resource")
+    || pathname.startsWith("/.well-known/oauth-authorization-server");
+}
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   // Cloudflare Tunnel rewrites Host to 127.0.0.1. The login form POST must
   // still reach the route; knowing the password is the CSRF gate.
   if (pathname === "/api/web-auth/session") return NextResponse.next();
+  // ChatGPT connector: bearer-token MCP endpoint and the OAuth endpoints that
+  // issue those tokens. /oauth/authorize checks the password session itself.
+  if (isConnectorPath(pathname)) return NextResponse.next();
 
   const mutating = request.method !== "GET" && request.method !== "HEAD" && request.method !== "OPTIONS";
   if (

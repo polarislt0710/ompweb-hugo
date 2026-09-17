@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Folder, GitBranch, Globe, X } from "lucide-react";
+import { Folder, Gauge, GitBranch, Globe, NotebookPen, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { getFileIcon } from "./FileIcons";
 
@@ -29,9 +29,15 @@ interface Props {
   gitBadge?: number;
   browserSelected?: boolean;
   onSelectBrowser?: () => void;
+  /** Per-session token usage tab. */
+  usageSelected?: boolean;
+  onSelectUsage?: () => void;
+  /** Project handoff notes tab. */
+  handoffSelected?: boolean;
+  onSelectHandoff?: () => void;
 }
 
-export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, explorerSelected = false, onSelectExplorer, explorerBadge = 0, gitSelected = false, onSelectGit, gitBadge = 0, browserSelected = false, onSelectBrowser }: Props) {
+export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, explorerSelected = false, onSelectExplorer, explorerBadge = 0, gitSelected = false, onSelectGit, gitBadge = 0, browserSelected = false, onSelectBrowser, usageSelected = false, onSelectUsage, handoffSelected = false, onSelectHandoff }: Props) {
   const { t } = useI18n();
   const [hoveredClose, setHoveredClose] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -257,6 +263,12 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, explorerSel
           <span style={{ fontWeight: browserSelected ? 500 : 400 }}>{t("browserPane.tab")}</span>
         </div>
       )}
+      {onSelectUsage && (
+        <PinnedTab id="usage" selected={usageSelected} onSelect={onSelectUsage} label={t("sessionUsage.tab")} title={t("sessionUsage.title")} icon={<Gauge size={13} strokeWidth={2} aria-hidden="true" style={{ color: usageSelected ? "var(--accent)" : undefined }} />} />
+      )}
+      {onSelectHandoff && (
+        <PinnedTab id="handoff" selected={handoffSelected} onSelect={onSelectHandoff} label={t("handoff.tab")} title={t("handoff.title")} icon={<NotebookPen size={13} strokeWidth={2} aria-hidden="true" style={{ color: handoffSelected ? "var(--accent)" : undefined }} />} />
+      )}
       {tabs.map((tab) => {
         const isActive = tab.id === activeTabId;
         return (
@@ -370,6 +382,47 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, explorerSel
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function PinnedTab({ id, selected, onSelect, label, title, icon }: { id: string; selected: boolean; onSelect: () => void; label: string; title: string; icon: React.ReactNode }) {
+  return (
+    <div
+      data-tab-id={id}
+      className="tabbar-tab ui-focus-ring"
+      onClick={onSelect}
+      role="tab"
+      tabIndex={selected ? 0 : -1}
+      aria-selected={selected}
+      aria-label={title}
+      title={title}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(); }
+      }}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        height: 36,
+        paddingLeft: 12,
+        paddingRight: 10,
+        borderRight: "1px solid var(--border)",
+        background: selected ? "var(--bg)" : "var(--bg-panel)",
+        cursor: "pointer",
+        fontSize: 12,
+        color: selected ? "var(--text)" : "var(--text-muted)",
+        whiteSpace: "nowrap",
+        flexShrink: 0,
+        userSelect: "none",
+        position: "relative",
+      }}
+    >
+      {selected && (
+        <span aria-hidden="true" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 2, background: "var(--accent)" }} />
+      )}
+      {icon}
+      <span style={{ fontWeight: selected ? 500 : 400 }}>{label}</span>
     </div>
   );
 }

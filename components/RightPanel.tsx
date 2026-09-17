@@ -20,10 +20,12 @@ import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { GitChangesPanel } from "./GitChangesPanel";
 import { FileViewer } from "./FileViewer";
 import { BrowserPane } from "./BrowserPane";
+import { SessionUsagePanel } from "./SessionUsagePanel";
+import { HandoffPanel } from "./HandoffPanel";
 import { useI18n } from "@/lib/i18n";
 import { getFileName } from "@/lib/file-paths";
 
-export type RightPanelView = "explorer" | "git" | "file" | "browser";
+export type RightPanelView = "explorer" | "git" | "file" | "browser" | "usage" | "handoff";
 
 interface Props {
   fileTabs: Tab[];
@@ -68,6 +70,9 @@ interface Props {
   onRightPanelResizeStart: (e: React.MouseEvent) => void;
   onRightPanelResizeKey: (e: React.KeyboardEvent) => void;
   browserSessionId?: string | null;
+  onInsertPrompt: (text: string) => void;
+  onStartHandoffSession: (cwd: string, prompt: string) => void;
+  onOpenDispatchRun: (sessionId: string) => void;
 }
 
 // Memo boundary: AppShell re-renders on polls, timers, and session updates
@@ -118,6 +123,9 @@ export const RightPanel = memo(function RightPanel({
   onRightPanelResizeStart,
   onRightPanelResizeKey,
   browserSessionId = null,
+  onInsertPrompt,
+  onStartHandoffSession,
+  onOpenDispatchRun,
 }: Props) {
   const { t } = useI18n();
   const activeFileTab = fileTabs.find((tab) => tab.id === activeFileTabId) ?? null;
@@ -165,7 +173,7 @@ export const RightPanel = memo(function RightPanel({
         }}
       >
         {/* Right panel toolbar: tabs + editor integrations (chat, path, explorer) */}
-        <div className="right-panel-toolbar" style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", minHeight: isMobile ? 44 : 36, paddingRight: isMobile ? 44 : 36, flexWrap: "wrap" }}>
+        <div className="right-panel-toolbar" style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--bg-panel)", borderBottom: "1px solid var(--border)", minHeight: isMobile ? 44 : 36, paddingRight: isMobile ? 88 : 72, flexWrap: "wrap" }}>
           <div style={{ flex: isMobile ? "1 0 100%" : "1 1 160px", overflow: "hidden", minWidth: 0 }}>
             <TabBar
               tabs={fileTabs}
@@ -180,6 +188,10 @@ export const RightPanel = memo(function RightPanel({
               gitBadge={gitBadge}
               browserSelected={rightView === "browser"}
               onSelectBrowser={() => onSelectView("browser")}
+              usageSelected={rightView === "usage"}
+              onSelectUsage={() => onSelectView("usage")}
+              handoffSelected={rightView === "handoff"}
+              onSelectHandoff={() => onSelectView("handoff")}
             />
           </div>
           {rightView === "explorer" ? (
@@ -404,6 +416,23 @@ export const RightPanel = memo(function RightPanel({
         </div>
         <div style={{ display: rightView === "browser" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
           <BrowserPane sessionId={browserSessionId ?? null} />
+        </div>
+        <div style={{ display: rightView === "usage" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
+          <SessionUsagePanel
+            sessionId={browserSessionId ?? null}
+            active={rightPanelOpen && rightView === "usage"}
+            onOpenHandoff={() => onSelectView("handoff")}
+          />
+        </div>
+        <div style={{ display: rightView === "handoff" ? "flex" : "none", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" }}>
+          <HandoffPanel
+            cwd={explorerCwd}
+            hasSession={browserSessionId !== null}
+            active={rightPanelOpen && rightView === "handoff"}
+            onInsertPrompt={onInsertPrompt}
+            onStartFreshSession={onStartHandoffSession}
+            onOpenDispatchRun={onOpenDispatchRun}
+          />
         </div>
         {/* Keep open viewers mounted so switching tabs preserves scroll and preview state. */}
         <div style={{ display: rightView === "file" ? "block" : "none", flex: 1, minHeight: 0, overflow: "hidden" }}>
