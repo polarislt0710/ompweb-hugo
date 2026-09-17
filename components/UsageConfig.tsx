@@ -919,6 +919,33 @@ export function UsageConfig() {
             })}
           </div>
         </div>
+
+        {/* Metric 6: Subagent share */}
+        <div
+          style={{
+            background: "var(--bg-panel)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-control)",
+            padding: "12px 14px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "var(--font-serif, serif)", color: "var(--text)" }}>
+            {formatCurrency(summary?.subagentCost ?? 0)}
+          </div>
+          <div style={{ fontSize: 11, fontWeight: 500, color: "var(--text)" }}>
+            {t("usageConfig.subagents")}
+          </div>
+          <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>
+            {t("usageConfig.subagentsSub", {
+              percent: summary && summary.totalCost > 0
+                ? Math.round(((summary.subagentCost || 0) / summary.totalCost) * 100)
+                : 0,
+            })}
+          </div>
+        </div>
       </div>
 
       {/* 4. Bottom Row: Breakdown Table & Cost Quality */}

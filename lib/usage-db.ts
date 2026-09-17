@@ -4,6 +4,7 @@ import { basename, dirname, join } from "path";
 import { readModelsConfig, type ModelsFileConfig } from "./omp/models-config";
 import { getAgentDir, getSessionsDir } from "./omp/paths";
 import { listSessionFiles } from "./omp/session-files";
+import { listSubagentTranscripts } from "./session-usage";
 import {
   formatChartDateLabel,
   formatFullDateLabel,
@@ -102,6 +103,13 @@ export function getUsageDatabase(customPath?: string): DatabaseSync {
     CREATE INDEX IF NOT EXISTS idx_usage_records_session_cwd ON usage_records(session_cwd);
   `);
 
+  // Subagent transcripts were not synced before this column existed, so every
+  // pre-existing row is a parent session and the default is correct.
+  const columns = db.prepare("PRAGMA table_info(usage_records)").all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === "is_subagent")) {
+    db.exec("ALTER TABLE usage_records ADD COLUMN is_subagent INTEGER NOT NULL DEFAULT 0;");
+  }
+
   globalThis.__ompUsageDatabase = db;
   globalThis.__ompUsageDatabasePath = targetPath;
   return db;
@@ -135,6 +143,8 @@ export function syncSessionFilesToDb(
   sessionFiles: string[],
   customModelsConfig: ModelsFileConfig = readModelsConfig(),
   customDb?: DatabaseSync,
+  /** Members of `sessionFiles` that are subagent transcripts. */
+  subagentFiles?: ReadonlySet<string>,
 ): SyncStats {
   const db = customDb || getUsageDatabase();
   const now = Date.now();
@@ -158,11 +168,13 @@ export function syncSessionFilesToDb(
     INSERT INTO usage_records (
       file_path, session_id, session_cwd, timestamp, provider, model,
       input_tokens, output_tokens, reasoning_tokens, cache_read_tokens,
-      cache_write_tokens, total_tokens, cost, cache_savings, cost_quality
+      cache_write_tokens, total_tokens, cost, cache_savings, cost_quality,
+      is_subagent
     ) VALUES (
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?,
-      ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?,
+      ?
     )
   `);
 
@@ -215,6 +227,7 @@ export function syncSessionFilesToDb(
           r.cost,
           r.cacheSavings,
           r.costQuality,
+          subagentFiles?.has(filePath) ? 1 : 0,
         );
         recordsInserted++;
       }
@@ -278,8 +291,12 @@ export async function getUsageReportFromDb(
 
   // Sync latest sessions from disk before querying
   const sessionsDir = getSessionsDir();
-  const sessionFiles = existsSync(sessionsDir) ? await listSessionFiles(sessionsDir) : [];
-  syncSessionFilesToDb(sessionFiles, readModelsConfig(), db);
+  const parentFiles = existsSync(sessionsDir) ? await listSessionFiles(sessionsDir) : [];
+  // Subagent transcripts live beside their parent and carry their own usage;
+  // the parent's task results do not, so without them subagent spend is lost.
+  const subagentFiles = new Set(parentFiles.flatMap((file) => listSubagentTranscripts(file).map((entry) => entry.filePath)));
+  const sessionFiles = [...parentFiles, ...subagentFiles];
+  syncSessionFilesToDb(sessionFiles, readModelsConfig(), db, subagentFiles);
   const hasExplicitBounds =
     typeof options.from === "number" &&
     typeof options.to === "number" &&
@@ -305,6 +322,7 @@ export async function getUsageReportFromDb(
       SELECT
         COUNT(*) AS usageRecordsCount,
         COALESCE(SUM(cost), 0) AS totalCost,
+        COALESCE(SUM(CASE WHEN is_subagent = 1 THEN cost ELSE 0 END), 0) AS subagentCost,
         COALESCE(SUM(total_tokens), 0) AS totalTokens,
         COALESCE(SUM(input_tokens), 0) AS inputTokens,
         COALESCE(SUM(output_tokens), 0) AS outputTokens,
@@ -323,6 +341,7 @@ export async function getUsageReportFromDb(
     .get(...params) as Record<string, number>;
 
   const totalCost = summaryRow?.totalCost ?? 0;
+  const subagentCost = summaryRow?.subagentCost ?? 0;
   const totalTokens = summaryRow?.totalTokens ?? 0;
   const inputTokens = summaryRow?.inputTokens ?? 0;
   const outputTokens = summaryRow?.outputTokens ?? 0;
@@ -345,6 +364,7 @@ export async function getUsageReportFromDb(
 
   const summary: UsageSummary = {
     totalCost,
+    subagentCost,
     totalTokens,
     inputTokens,
     outputTokens,
@@ -599,7 +619,7 @@ export async function getUsageReportFromDb(
         session_cwd AS project,
         COALESCE(SUM(cost), 0) AS cost,
         COALESCE(SUM(total_tokens), 0) AS tokens,
-        COUNT(DISTINCT session_id) AS sessionsCount
+        COUNT(DISTINCT CASE WHEN is_subagent = 0 THEN session_id END) AS sessionsCount
       FROM usage_records
       WHERE timestamp >= ? AND timestamp <= ? ${whereProject}
       GROUP BY session_cwd

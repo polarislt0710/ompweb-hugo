@@ -30,6 +30,8 @@ export interface UsageRecord {
 
 export interface UsageSummary {
   totalCost: number;
+  /** Part of totalCost spent inside subagent transcripts. */
+  subagentCost: number;
   totalTokens: number;
   inputTokens: number;
   outputTokens: number;
