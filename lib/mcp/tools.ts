@@ -52,7 +52,11 @@ export interface McpToolResult {
 const MAX_LIST_FILES = 800;
 const MAX_SEARCH_MATCHES = 300;
 const MAX_DIFF_BYTES = 400 * 1024;
-const MAX_PLAN_BYTES = 200 * 1024;
+// A reviewed plan for a whole product track runs to a hundred-odd tickets: the
+// EdSight one is 112 KB at 63 tickets and still being written. The foremen that
+// read it have million-token windows, so the cap is a guard against nonsense,
+// not a budget.
+const MAX_PLAN_BYTES = 500 * 1024;
 const MAX_MESSAGE_CHARS = 8000;
 
 const projectProp = { type: "string", description: "Project name or absolute path from list_projects." };
