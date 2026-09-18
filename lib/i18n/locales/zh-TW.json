@@ -1650,5 +1650,9 @@
   "dispatch.login.saved": "{date} 儲存",
   "dispatch.login.forget": "刪走呢個登入",
   "dispatch.login.forgetConfirm": "刪走 {host} 嘅登入紀錄？連 cookie 一齊刪。",
-  "dispatch.login.warning": "登入紀錄淨係用喺自己嗰個網域，每次截圖都行喺一份用完即棄嘅副本上。但佢始終係你個戶口：用佢開嘅頁面等於你自己開。"
+  "dispatch.login.warning": "登入紀錄淨係用喺自己嗰個網域，每次截圖都行喺一份用完即棄嘅副本上。但佢始終係你個戶口：用佢開嘅頁面等於你自己開。",
+  "dispatch.login.kept": "存低咗 {count} 個 cookie，capture_page 影呢個網域會係登入後嘅樣。",
+  "dispatch.login.keptNone": "乜都存唔到 —— 個登入視窗已經關咗。再開一次，關之前先撳呢粒。",
+  "handoff.read": "睇",
+  "handoff.edit": "改"
 }

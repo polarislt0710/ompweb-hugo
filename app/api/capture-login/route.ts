@@ -54,8 +54,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ profile: { slug: profile.slug, host: profile.host }, ...view() });
     }
     if (record.action === "finish") {
-      finishCaptureLogin(record.slug);
-      return NextResponse.json(view());
+      const finished = await finishCaptureLogin(record.slug);
+      return NextResponse.json({ cookieCount: finished.cookieCount, ...view() });
     }
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   } catch (error) {

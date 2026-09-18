@@ -111,6 +111,10 @@ Settings → Apps → Developer mode → new app → paste the URL → auth **OA
 - Tools: list projects, read/search files, git diff, read handoff, write
   `plan.md`, request a dispatch, message a foreman, search the web. No shell,
   no source edits.
+- A ticket that needs a web lookup goes to `agent: researcher`
+  (`~/.omp/agent/agents/researcher.md`), which has omp's `web_search` and the
+  same Perplexity provider, and writes its findings to a file the other tickets
+  depend on — rather than a coding worker guessing.
 - Visual review (`lib/mcp/screenshots.ts`, `lib/mcp/capture.ts`): `view_image`
   returns a mockup or saved screenshot from the repo; `capture_page` drives one
   headless Chrome over DevTools to shoot up to 6 pages per call — project HTML
@@ -127,7 +131,13 @@ Settings → Apps → Developer mode → new app → paste the URL → auth **OA
   ChatGPT connector → *Signed-in screenshots*: type the login page, press
   **Open browser**, log in by hand in the Chrome window that appears on this
   Mac, press **I'm logged in**. The window is a real browser — no password is
-  typed into OMP Web or stored by it. The session lives in
+  typed into OMP Web or stored by it. Pressing the button reads the session out
+  of the live window over DevTools before closing it, because Chrome only writes
+  cookies that carry an expiry to disk and plenty of sites sign you in with one
+  that does not; those cookies are replayed into each capture. If the window was
+  already closed there is nothing to read, and the login is refused rather than
+  marked done — otherwise the reviewer gets logged-out screenshots labelled
+  "signed in". The session lives in
   `~/.omp/agent/ompweb-capture-profiles/<host>` (0700) and is used *only* for
   that host and its subdomains; every capture runs on a throwaway copy, so a
   captured page cannot change or end the saved session, and two captures never

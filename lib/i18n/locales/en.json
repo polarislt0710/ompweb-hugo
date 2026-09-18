@@ -1649,5 +1649,9 @@
   "dispatch.login.saved": "saved {date}",
   "dispatch.login.forget": "Forget this session",
   "dispatch.login.forgetConfirm": "Forget the saved login for {host}? Its cookies are deleted.",
-  "dispatch.login.warning": "A saved session is used only for its own host, and every capture runs on a throwaway copy. It is still your account: a page opened with it is opened as you."
+  "dispatch.login.warning": "A saved session is used only for its own host, and every capture runs on a throwaway copy. It is still your account: a page opened with it is opened as you.",
+  "dispatch.login.kept": "Kept {count} cookies. capture_page will shoot this host signed in.",
+  "dispatch.login.keptNone": "Nothing was kept — the login window was already closed. Open it again and press this before closing it.",
+  "handoff.read": "Read",
+  "handoff.edit": "Edit"
 }

@@ -1649,5 +1649,9 @@
   "dispatch.login.saved": "{date} 保存",
   "dispatch.login.forget": "删除这个登录",
   "dispatch.login.forgetConfirm": "删除 {host} 的登录记录？其 cookie 一并删除。",
-  "dispatch.login.warning": "登录记录只用于它自己的域名，每次截图都在一份用完即弃的副本上运行。但它仍是你的账户：用它打开的页面等于你亲自打开。"
+  "dispatch.login.warning": "登录记录只用于它自己的域名，每次截图都在一份用完即弃的副本上运行。但它仍是你的账户：用它打开的页面等于你亲自打开。",
+  "dispatch.login.kept": "已保存 {count} 个 cookie，capture_page 拍这个域名会是登录后的样子。",
+  "dispatch.login.keptNone": "什么都没保存 —— 登录窗口已经关掉了。重新打开一次，关闭前先点这里。",
+  "handoff.read": "阅读",
+  "handoff.edit": "编辑"
 }

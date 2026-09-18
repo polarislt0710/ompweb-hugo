@@ -75,6 +75,8 @@ export function DispatchSection({ cwd, active, planVersion, planDirty, onOpenRun
   const [showConnector, setShowConnector] = useState(false);
   const [logins, setLogins] = useState<CaptureProfileView[]>([]);
   const [loginUrl, setLoginUrl] = useState("");
+  /** What the last "I'm logged in" actually kept, so a failed login is visible. */
+  const [loginKept, setLoginKept] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -199,6 +201,7 @@ export function DispatchSection({ cwd, active, planVersion, planDirty, onOpenRun
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : `HTTP ${response.status}`);
       setLogins((body.profiles as CaptureProfileView[] | undefined) ?? []);
+      setLoginKept(typeof body.cookieCount === "number" ? body.cookieCount : null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -432,6 +435,11 @@ export function DispatchSection({ cwd, active, planVersion, planDirty, onOpenRun
                   </button>
                 </form>
 
+                {loginKept !== null && (
+                  <div style={{ fontSize: 11, color: loginKept > 0 ? "var(--accent)" : "var(--status-error, #dc2626)" }}>
+                    {loginKept > 0 ? t("dispatch.login.kept", { count: loginKept }) : t("dispatch.login.keptNone")}
+                  </div>
+                )}
                 <div style={dim}>{t("dispatch.login.warning")}</div>
               </div>
             </>

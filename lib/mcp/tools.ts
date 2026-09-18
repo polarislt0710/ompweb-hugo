@@ -263,7 +263,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
 export const MCP_SERVER_INSTRUCTIONS = `OMP Web connector. Roles: you (the reviewer) read code, write a ticket plan and check results; OMP's foreman and workers execute it.
 Workflow: list_projects → project_overview → list_files / search_code / read_file → write_plan → request_dispatch → later get_runs + get_handoff (status.md) + git_diff to review → write a follow-up plan if needed.
 For UI work you can also look: view_image opens a mockup or a saved screenshot, and capture_page screenshots several pages at once — project HTML files, a local dev server, or the deployed site — full-page, at desktop and phone widths, so you can compare the built screen against the design one screen at a time.
-search_web answers from the web with its sources named, through the owner's own subscription, and defaults to Hong Kong HKDSE sources — use it before asserting anything about the exam, the curriculum or a library's current behaviour.
+search_web answers from the web with its sources named, through the owner's own subscription, and defaults to Hong Kong HKDSE sources — use it before asserting anything about the exam, the curriculum or a library's current behaviour. When the work itself needs a lookup, do not do it here: give the plan a ticket with agent: researcher, which has the same search and writes its findings to a file the other tickets depend on.
 Make tickets specific enough that workers need no investigation. Workers are cheap models; the plan is where the thinking goes.`;
 
 function directDispatch(): boolean {

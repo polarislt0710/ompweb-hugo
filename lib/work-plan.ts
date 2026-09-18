@@ -13,7 +13,7 @@
 //
 //   Free-form steps and acceptance criteria.
 
-export const PLAN_AGENTS = ["worker-fast", "worker", "writer", "visual-checker", "scout", "reviewer"] as const;
+export const PLAN_AGENTS = ["worker-fast", "worker", "writer", "visual-checker", "scout", "researcher", "reviewer"] as const;
 export type PlanAgent = (typeof PLAN_AGENTS)[number];
 
 export const PLAN_FORMAT_GUIDE = `Plan format (.omp/handoff/plan.md):
@@ -26,7 +26,7 @@ Short background every worker needs: stack, constraints, what not to touch.
 ## Tickets
 
 ### T1: <short title>
-- agent: worker-fast | worker | writer | visual-checker | scout | reviewer
+- agent: worker-fast | worker | writer | visual-checker | scout | researcher | reviewer
 - depends: none | T<n>, T<m>
 - files: path/one.ts, path/two.ts
 - verify: <one shell command that passes once THIS ticket is done, e.g. npm test -- lib/x.test.mjs>
@@ -37,7 +37,12 @@ edge cases.
 
 Agent guide: worker-fast = fully specified mechanical edit; worker = one scoped
 coding ticket; writer = copy/docs; visual-checker = screenshots/UI check
-(read-only); scout = read/search only; reviewer = review a diff (read-only).
+(read-only); scout = read/search the codebase only; researcher = look something
+up on the web and report it with its sources (Perplexity, no token cost);
+reviewer = review a diff (read-only).
+A ticket that depends on a fact nobody here knows — a syllabus rule, a current
+API, a price — belongs to researcher, with its output file named, and the
+tickets that need the answer depending on it. Do not make a coding worker guess.
 Keep tickets small (one worker, under ~30 minutes). Ticket ids must be unique.
 A verify command must be able to pass on its own. If a shared suite only goes
 green after several tickets, give the earlier tickets a narrower check and put

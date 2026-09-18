@@ -17,12 +17,13 @@
 // a URL that acts on a GET (sign out, delete, approve) would act for real. The
 // owner is told that, and chooses which hosts get a profile.
 
-import { spawn, type ChildProcess } from "child_process";
+import { execFileSync, spawn, type ChildProcess } from "child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { getAgentDir } from "../omp/paths";
 import { resolveChromeBinary } from "../chrome-path";
+import { browserWebSocketUrl, DevTools, type CaptureCookie } from "./capture";
 
 export interface CaptureProfile {
   /** Filesystem-safe id, derived from the host. */
@@ -166,6 +167,9 @@ export function startCaptureLogin(rawUrl: unknown): CaptureProfile {
 
   const child = spawn(chrome, [
     `--user-data-dir=${dir}`,
+    // Bound to loopback on a port Chrome picks. It is how the finished session
+    // is read out of this window; it closes with the window.
+    "--remote-debugging-port=0",
     "--no-first-run",
     "--no-default-browser-check",
     "--no-service-autorun",
@@ -193,22 +197,96 @@ export function startCaptureLogin(rawUrl: unknown): CaptureProfile {
   return profile;
 }
 
-/** The owner says the login is done: close the window and mark the profile usable. */
-export function finishCaptureLogin(slug: unknown): CaptureProfile {
+function cookiesPath(slug: string): string {
+  return join(profilesDir(), `${slug}.cookies.json`);
+}
+
+/**
+ * Read the session out of the open login window before closing it.
+ *
+ * Chrome only writes cookies that carry an expiry to disk, and plenty of sites
+ * sign you in with a session cookie, which would be gone the moment the window
+ * closed. Asking the live browser for its cookies is the only way to keep those.
+ */
+async function exportCookies(slug: string, dir: string): Promise<number> {
+  let browser: DevTools | undefined;
+  try {
+    browser = await DevTools.connect(await browserWebSocketUrl(dir, 4000));
+    const result = await browser.send("Storage.getCookies") as { cookies?: unknown[] };
+    const cookies = Array.isArray(result.cookies) ? result.cookies : [];
+    writeFileSync(cookiesPath(slug), JSON.stringify(cookies), { mode: 0o600 });
+    return cookies.length;
+  } finally {
+    browser?.close();
+  }
+}
+
+/** The main browser process for a profile, found by its command line. */
+function loginProcessIds(dir: string): number[] {
+  try {
+    return execFileSync("ps", ["-Ao", "pid=,command="], { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 })
+      .split("\n")
+      .filter((line) => line.includes(`--user-data-dir=${dir}`) && !line.includes("--type="))
+      .map((line) => Number.parseInt(line.trim().split(/\s+/)[0] ?? "", 10))
+      .filter((pid) => Number.isInteger(pid) && pid > 0);
+  } catch {
+    return [];
+  }
+}
+
+/** The owner says the login is done: keep the session, then close the window. */
+export async function finishCaptureLogin(slug: unknown): Promise<CaptureProfile & { cookieCount: number }> {
   const id = typeof slug === "string" ? slug : "";
   const store = readStore();
   const profile = store.profiles.find((entry) => entry.slug === id);
   if (!profile) throw new CaptureProfileError("No such capture login.");
+  const dir = captureProfileDir(id);
+
+  let cookieCount = 0;
+  let exportFailed = "";
+  try {
+    cookieCount = await exportCookies(id, dir);
+  } catch (error) {
+    // An older window (or one the owner already closed) has nothing to read;
+    // fall back to whatever Chrome wrote to the profile on its way out.
+    exportFailed = error instanceof Error ? error.message : String(error);
+  }
 
   const child = openLogins.get(id);
-  if (child && child.exitCode === null) {
-    // Chrome flushes its cookie database on quit; a kill -9 here can lose the session.
-    child.kill("SIGTERM");
-  }
+  if (child && child.exitCode === null) child.kill("SIGTERM");
   openLogins.delete(id);
+  // The server may have restarted since the window opened, losing the handle.
+  // Chrome flushes its cookie database on quit, so it must be asked, not killed.
+  for (const pid of loginProcessIds(dir)) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      // already gone
+    }
+  }
+
+  if (exportFailed) {
+    // Without the session read out of the live window there is nothing to
+    // promise: Chrome only writes cookies that carry an expiry, and plenty of
+    // sites sign you in with one that does not. Saying "signed in" here would
+    // hand the reviewer logged-out screenshots labelled as logged in.
+    throw new CaptureProfileError(
+      `The login window was already closed, so nothing could be kept (${exportFailed}). Open it again, log in, and press this before closing the window.`,
+    );
+  }
   profile.loggedInAt = Date.now();
   writeStore(store);
-  return profile;
+  return { ...profile, cookieCount };
+}
+
+/** The cookies kept when the owner finished logging in, for one capture. */
+export function readSavedCookies(slug: string): CaptureCookie[] {
+  try {
+    const parsed = JSON.parse(readFileSync(cookiesPath(slug), "utf8")) as CaptureCookie[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 export function deleteCaptureProfile(slug: unknown): void {
@@ -220,6 +298,7 @@ export function deleteCaptureProfile(slug: unknown): void {
   store.profiles = store.profiles.filter((profile) => profile.slug !== id);
   writeStore(store);
   rmSync(captureProfileDir(id), { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+  rmSync(cookiesPath(id), { force: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -242,7 +321,9 @@ export function cloneProfileForCapture(slug: string): { dir: string; dispose: ()
     // Chrome's own lock files would make the copy look like a running browser.
     filter: (from) => {
       const name = from.slice(from.lastIndexOf("/") + 1);
-      if (name.startsWith("Singleton")) return false;
+      // Singleton* is the browser's profile lock; DevToolsActivePort would point
+      // the next browser at the dead port of the window this profile came from.
+      if (name.startsWith("Singleton") || name === "DevToolsActivePort") return false;
       return !SKIP_DIRS.has(name);
     },
   });

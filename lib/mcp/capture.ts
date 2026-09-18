@@ -25,6 +25,18 @@ export interface CaptureRequest {
   viewport: Viewport;
 }
 
+/** A cookie as DevTools hands it over, and as it is handed back. */
+export interface CaptureCookie {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  expires?: number;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: string;
+}
+
 export interface CaptureResult {
   label: string;
   viewport: Viewport;
@@ -38,7 +50,7 @@ const MAX_FULL_PAGE_HEIGHT = 6000;
 const LOAD_TIMEOUT_MS = 20_000;
 const CHROME_START_TIMEOUT_MS = 20_000;
 
-class DevTools {
+export class DevTools {
   private nextId = 1;
   private readonly pending = new Map<number, { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void }>();
   private readonly waiters = new Map<string, Array<() => void>>();
@@ -107,20 +119,35 @@ class DevTools {
   }
 }
 
-/** The page's own DevTools socket, so no session plumbing is needed. */
-async function pageWebSocketUrl(userDataDir: string, child: ChildProcess): Promise<string> {
+/**
+ * Chrome writes its debugging port, then the browser target's socket path, to
+ * DevToolsActivePort. Waiting for the file is how we know it is listening.
+ */
+async function devToolsPort(userDataDir: string, child?: ChildProcess, timeoutMs = CHROME_START_TIMEOUT_MS): Promise<{ port: string; browserPath: string }> {
   const portFile = join(userDataDir, "DevToolsActivePort");
-  const deadline = Date.now() + CHROME_START_TIMEOUT_MS;
-  let port = "";
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`The browser exited with code ${child.exitCode}`);
+    if (child && child.exitCode !== null) throw new Error(`The browser exited with code ${child.exitCode}`);
     if (existsSync(portFile)) {
-      const first = readFileSync(portFile, "utf8").split("\n")[0]?.trim();
-      if (first) { port = first; break; }
+      const [first, second] = readFileSync(portFile, "utf8").split("\n");
+      if (first?.trim()) return { port: first.trim(), browserPath: second?.trim() ?? "" };
     }
     await delay(150);
   }
-  if (!port) throw new Error("The browser did not start in time");
+  throw new Error("The browser did not start in time");
+}
+
+/** The browser-wide socket, for asking a running Chrome about its cookies. */
+export async function browserWebSocketUrl(userDataDir: string, timeoutMs?: number): Promise<string> {
+  const { port, browserPath } = await devToolsPort(userDataDir, undefined, timeoutMs);
+  if (!browserPath) throw new Error("The browser exposed no control socket");
+  return `ws://127.0.0.1:${port}${browserPath}`;
+}
+
+/** The page's own DevTools socket, so no session plumbing is needed. */
+async function pageWebSocketUrl(userDataDir: string, child: ChildProcess): Promise<string> {
+  const { port } = await devToolsPort(userDataDir, child);
+  const deadline = Date.now() + CHROME_START_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
     try {
@@ -142,11 +169,13 @@ async function pageWebSocketUrl(userDataDir: string, child: ChildProcess): Promi
 export async function captureAll(
   chromeBinary: string,
   requests: readonly CaptureRequest[],
-  options: { fullPage: boolean; waitMs: number; profileDir?: string },
+  options: { fullPage: boolean; waitMs: number; profileDir?: string; cookies?: readonly CaptureCookie[] },
 ): Promise<CaptureResult[]> {
   // A profile directory carries a signed-in session and belongs to the caller,
   // which disposes of it; without one the browser starts clean and throwaway.
   const userDataDir = options.profileDir ?? mkdtempSync(join(tmpdir(), "ompweb-capture-"));
+  // A stale port file would be read as this browser's, before it writes its own.
+  rmSync(join(userDataDir, "DevToolsActivePort"), { force: true });
   const child = spawn(chromeBinary, [
     "--headless=new",
     "--remote-debugging-port=0",
@@ -166,6 +195,12 @@ export async function captureAll(
   try {
     page = await DevTools.connect(await pageWebSocketUrl(userDataDir, child));
     await page.send("Page.enable");
+    if (options.cookies?.length) {
+      // Session cookies never reach the profile on disk, so the ones captured
+      // when the owner finished logging in are replayed into this browser.
+      await page.send("Network.enable");
+      await page.send("Network.setCookies", { cookies: options.cookies }).catch(() => undefined);
+    }
 
     for (const request of requests) {
       try {

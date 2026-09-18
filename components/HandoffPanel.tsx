@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { NotebookPen, PenLine, RefreshCw, Save, SquarePlus } from "lucide-react";
+import { Eye, NotebookPen, Pencil, PenLine, RefreshCw, Save, SquarePlus } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { DispatchSection } from "./DispatchSection";
+import { MarkdownBody } from "./MarkdownBody";
 import { EmptyState } from "./SessionUsagePanel";
 
 const FILE_NAMES = ["plan.md", "status.md", "decisions.md"] as const;
@@ -36,6 +37,9 @@ export function HandoffPanel({ cwd, hasSession, active, onInsertPrompt, onStartF
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [planVersion, setPlanVersion] = useState(0);
+  // These files are markdown, and are read far more often than they are edited,
+  // so the panel shows them rendered until the owner asks to type.
+  const [editing, setEditing] = useState(false);
 
   const load = useCallback(async () => {
     if (!cwd) return;
@@ -191,8 +195,28 @@ export function HandoffPanel({ cwd, hasSession, active, onInsertPrompt, onStartF
             </button>
           );
         })}
+        <button
+          type="button"
+          onClick={() => setEditing((on) => !on)}
+          title={editing ? t("handoff.read") : t("handoff.edit")}
+          style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 4, padding: "5px 8px", fontSize: 11, border: "none", background: "none", color: "var(--text-muted)", cursor: "pointer" }}
+        >
+          {editing ? <Eye size={12} strokeWidth={2} aria-hidden="true" /> : <Pencil size={12} strokeWidth={2} aria-hidden="true" />}
+          {editing ? t("handoff.read") : t("handoff.edit")}
+        </button>
       </div>
 
+      {!editing ? (
+        <div
+          onDoubleClick={() => setEditing(true)}
+          title={t("handoff.edit")}
+          style={{ flex: 1, minHeight: 160, overflow: "auto", padding: "4px 10px", fontSize: 12, lineHeight: 1.6, color: "var(--text)", background: "var(--bg-subtle)", border: "1px solid var(--border)", borderRadius: "var(--radius-control)" }}
+        >
+          {value.trim()
+            ? <MarkdownBody cwd={cwd ?? undefined}>{value}</MarkdownBody>
+            : <span style={{ color: "var(--text-dim)" }}>{t(`handoff.placeholder.${selected.replace(".md", "")}`)}</span>}
+        </div>
+      ) : (
       <textarea
         value={value}
         onChange={(e) => {
@@ -203,6 +227,7 @@ export function HandoffPanel({ cwd, hasSession, active, onInsertPrompt, onStartF
         spellCheck={false}
         style={{ flex: 1, minHeight: 160, resize: "none", padding: 8, fontSize: 12, lineHeight: 1.55, fontFamily: "var(--font-mono)", color: "var(--text)", background: "var(--bg-subtle)", border: "1px solid var(--border)", borderRadius: "var(--radius-control)", outline: "none" }}
       />
+      )}
 
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {error && <span style={{ color: "var(--status-error, #dc2626)", fontSize: 11, flex: 1 }}>{error}</span>}

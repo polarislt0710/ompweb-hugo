@@ -19,7 +19,7 @@ import { readFileSync, statSync } from "fs";
 import { isIP } from "net";
 import { resolveChromeBinary } from "../chrome-path";
 import { captureAll, type CaptureRequest, type CaptureResult, type Viewport } from "./capture";
-import { captureProfileForHost, cloneProfileForCapture, touchCaptureProfile } from "./capture-profiles";
+import { captureProfileForHost, cloneProfileForCapture, readSavedCookies, touchCaptureProfile } from "./capture-profiles";
 import { ProjectAccessError, resolveReadablePath, type ConnectorProject } from "./project-files";
 
 /** ChatGPT has to carry the image in the conversation, so keep it small. */
@@ -226,9 +226,11 @@ async function captureBySession(
   for (const [slug, indexes] of groups) {
     const requests = indexes.map((index) => planned[index].request);
     let profile: { dir: string; dispose: () => void } | null = null;
+    let cookies: ReturnType<typeof readSavedCookies> = [];
     try {
       if (slug) {
         profile = cloneProfileForCapture(slug);
+        cookies = readSavedCookies(slug);
         touchCaptureProfile(slug);
       }
     } catch {
@@ -236,8 +238,12 @@ async function captureBySession(
       // pages logged out rather than losing the whole comparison.
       profile = null;
     }
-    const shots = await captureAll(chrome, requests, { fullPage: options.fullPage, waitMs: options.waitMs, ...(profile ? { profileDir: profile.dir } : {}) })
-      .finally(() => profile?.dispose());
+    const shots = await captureAll(chrome, requests, {
+      fullPage: options.fullPage,
+      waitMs: options.waitMs,
+      ...(profile ? { profileDir: profile.dir } : {}),
+      ...(cookies.length > 0 ? { cookies } : {}),
+    }).finally(() => profile?.dispose());
     shots.forEach((result, position) => {
       collected[indexes[position]] = { result, signedIn: Boolean(profile) };
     });

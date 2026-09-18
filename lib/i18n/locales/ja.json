@@ -1649,5 +1649,9 @@
   "dispatch.login.saved": "{date} に保存",
   "dispatch.login.forget": "このログインを削除",
   "dispatch.login.forgetConfirm": "{host} の保存されたログインを削除しますか？ Cookie も削除されます。",
-  "dispatch.login.warning": "保存されたセッションはそのホストにのみ使われ、撮影のたびに使い捨てのコピー上で動きます。ただしあなたのアカウントであることに変わりはありません。"
+  "dispatch.login.warning": "保存されたセッションはそのホストにのみ使われ、撮影のたびに使い捨てのコピー上で動きます。ただしあなたのアカウントであることに変わりはありません。",
+  "dispatch.login.kept": "Cookie を {count} 件保存しました。capture_page はこのホストをログイン状態で撮ります。",
+  "dispatch.login.keptNone": "何も保存されませんでした。ログインウィンドウが既に閉じています。もう一度開き、閉じる前にここを押してください。",
+  "handoff.read": "表示",
+  "handoff.edit": "編集"
 }
