@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, Copy, Eye, Play, Plug, Send, Unplug, X } from "lucide-react";
+import { Check, Copy, Eye, LogIn, Play, Plug, Send, Unplug, X } from "lucide-react";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/lib/i18n";
 import type { ParsedPlan } from "@/lib/work-plan";
@@ -38,6 +38,16 @@ interface ConnectorState {
   connected: Array<{ name: string; kind: string }>;
 }
 
+/** A browser session the owner logged in by hand, so capture_page can shoot past a login. */
+interface CaptureProfileView {
+  slug: string;
+  host: string;
+  url: string;
+  loggedInAt: number | null;
+  lastUsedAt: number | null;
+  open: boolean;
+}
+
 interface Props {
   cwd: string;
   active: boolean;
@@ -63,6 +73,8 @@ export function DispatchSection({ cwd, active, planVersion, planDirty, onOpenRun
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [showConnector, setShowConnector] = useState(false);
+  const [logins, setLogins] = useState<CaptureProfileView[]>([]);
+  const [loginUrl, setLoginUrl] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -96,9 +108,22 @@ export function DispatchSection({ cwd, active, planVersion, planDirty, onOpenRun
     return () => clearInterval(timer);
   }, [active, load, planVersion]);
 
+  const loadLogins = useCallback(async () => {
+    try {
+      const response = await fetch("/api/capture-login", { cache: "no-store" });
+      if (response.ok) setLogins(((await response.json()) as { profiles?: CaptureProfileView[] }).profiles ?? []);
+    } catch {
+      // Saved sessions are optional; capture still works logged out.
+    }
+  }, []);
+
   useEffect(() => {
     if (active) void loadConnector();
   }, [active, loadConnector]);
+
+  useEffect(() => {
+    if (active && showConnector) void loadLogins();
+  }, [active, showConnector, loadLogins]);
 
   const plan = state?.plan;
   const pending = state?.requests.find((request) => request.status === "pending") ?? null;
@@ -139,6 +164,58 @@ export function DispatchSection({ cwd, active, planVersion, planDirty, onOpenRun
     setCopied("review");
     setTimeout(() => setCopied(null), 2500);
     window.open(CHATGPT_URL, "_blank", "noopener,noreferrer");
+  };
+
+  /** Step 1: open a real Chrome window here. The owner types the password there, not in OMP Web. */
+  const startLogin = async () => {
+    setBusy("login");
+    try {
+      const response = await fetch("/api/capture-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "start", url: loginUrl }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : `HTTP ${response.status}`);
+      setLogins((body.profiles as CaptureProfileView[] | undefined) ?? []);
+      setLoginUrl("");
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** Step 2: the owner is logged in — close the window and keep the session. */
+  const finishLogin = async (slug: string) => {
+    setBusy(`finish:${slug}`);
+    try {
+      const response = await fetch("/api/capture-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "finish", slug }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : `HTTP ${response.status}`);
+      setLogins((body.profiles as CaptureProfileView[] | undefined) ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const forgetLogin = async (profile: CaptureProfileView) => {
+    if (!window.confirm(t("dispatch.login.forgetConfirm", { host: profile.host }))) return;
+    setBusy(`forget:${profile.slug}`);
+    try {
+      const response = await fetch(`/api/capture-login?slug=${encodeURIComponent(profile.slug)}`, { method: "DELETE" });
+      const body = await response.json().catch(() => ({}));
+      setLogins((body.profiles as CaptureProfileView[] | undefined) ?? []);
+    } finally {
+      setBusy(null);
+    }
   };
 
   const disconnect = async () => {
@@ -301,6 +378,62 @@ export function DispatchSection({ cwd, active, planVersion, planDirty, onOpenRun
               <button type="button" disabled={connector.connected.length === 0 || busy === "disconnect"} onClick={() => { void disconnect(); }} style={{ ...button(connector.connected.length > 0), alignSelf: "flex-start" }}>
                 <Unplug size={12} aria-hidden="true" />{t("dispatch.connector.disconnect")}
               </button>
+
+              <div style={{ borderTop: "1px solid var(--border)", marginTop: 3, paddingTop: 7, display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ fontWeight: 600, color: "var(--text)", fontSize: 11 }}>{t("dispatch.login.title")}</div>
+                <div style={dim}>{t("dispatch.login.howto")}</div>
+
+                {logins.map((profile) => (
+                  <div key={profile.slug} style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
+                    <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11 }}>
+                      {profile.host}
+                      <span style={dim}>
+                        {" · "}
+                        {profile.open
+                          ? t("dispatch.login.waiting")
+                          : profile.loggedInAt
+                            ? t("dispatch.login.saved", { date: new Date(profile.loggedInAt).toLocaleDateString() })
+                            : t("dispatch.login.unfinished")}
+                      </span>
+                    </span>
+                    {(profile.open || !profile.loggedInAt) && (
+                      <button type="button" disabled={busy === `finish:${profile.slug}`} onClick={() => { void finishLogin(profile.slug); }} style={button(true, true)}>
+                        <Check size={12} aria-hidden="true" />{t("dispatch.login.done")}
+                      </button>
+                    )}
+                    <button type="button" title={t("dispatch.login.forget")} disabled={busy === `forget:${profile.slug}`} onClick={() => { void forgetLogin(profile); }} style={button(true)}>
+                      <X size={12} aria-hidden="true" />
+                    </button>
+                  </div>
+                ))}
+
+                <form
+                  onSubmit={(event) => { event.preventDefault(); if (loginUrl.trim()) void startLogin(); }}
+                  style={{ display: "flex", gap: 6, alignItems: "center" }}
+                >
+                  <input
+                    type="text"
+                    value={loginUrl}
+                    onChange={(event) => setLoginUrl(event.target.value)}
+                    placeholder={t("dispatch.login.placeholder")}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      padding: "4px 7px",
+                      fontSize: 11,
+                      border: "1px solid var(--border)",
+                      borderRadius: "var(--radius-control)",
+                      background: "var(--bg)",
+                      color: "var(--text)",
+                    }}
+                  />
+                  <button type="submit" disabled={busy === "login" || loginUrl.trim().length === 0} style={button(busy !== "login" && loginUrl.trim().length > 0)}>
+                    <LogIn size={12} aria-hidden="true" />{t("dispatch.login.open")}
+                  </button>
+                </form>
+
+                <div style={dim}>{t("dispatch.login.warning")}</div>
+              </div>
             </>
           )}
         </div>

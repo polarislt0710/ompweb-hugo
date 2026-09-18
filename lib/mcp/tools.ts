@@ -19,6 +19,7 @@ import { HandoffError, readHandoffFiles, writeHandoffFile } from "../handoff";
 import { getSessionUsageBreakdown } from "../session-usage";
 import { parsePlan, PLAN_FORMAT_GUIDE } from "../work-plan";
 import { capturePages, readProjectImage, MAX_TARGETS, type CapturedImage } from "./screenshots";
+import { searchWeb, WebSearchError } from "./web-search";
 import {
   isSecretPath,
   listConnectorProjects,
@@ -171,7 +172,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "capture_page",
     title: "Capture pages",
-    description: `Screenshot up to ${MAX_TARGETS} pages with headless Chrome and look at them. Each target is an HTML file in the project (a mockup), a page on a dev server the owner is already running here (http://localhost:PORT/path), or a deployed site (https://example.com/pricing). Full-page by default, and \`viewport: "both"\` returns a desktop and a phone shot of each page — made for comparing the built UI against the design, one screen at a time. It does not start a dev server, and pages behind a login come back logged out.`,
+    description: `Screenshot up to ${MAX_TARGETS} pages with headless Chrome and look at them. Each target is an HTML file in the project (a mockup), a page on a dev server the owner is already running here (http://localhost:PORT/path), or a deployed site (https://example.com/pricing). Full-page by default, and \`viewport: "both"\` returns a desktop and a phone shot of each page — made for comparing the built UI against the design, one screen at a time. It does not start a dev server. A page behind a login comes back logged out unless the owner saved a signed-in session for that host in OMP Web, in which case the shot says \"signed in\".`,
     inputSchema: {
       type: "object",
       properties: {
@@ -191,6 +192,23 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       additionalProperties: false,
     },
     annotations: readOnly,
+  },
+  {
+    name: "search_web",
+    title: "Search the web",
+    description: "Search the web through the owner's own Perplexity subscription and get an answer with its sources named. Costs no tokens. Default focus is HKDSE: the question is pinned to Hong Kong's exam authority and curriculum sources (hkeaa.edu.hk, edb.gov.hk) instead of whatever syllabus ranks highest worldwide. Use focus \"web\" for ordinary questions — a library's docs, a framework's release notes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "What to find out, in one question (up to 400 characters)" },
+        focus: { type: "string", enum: ["hkdse", "web"], description: "hkdse (default) pins the answer to Hong Kong exam sources; web searches without that constraint" },
+        recency: { type: "string", enum: ["hour", "day", "week", "month", "year"], description: "Only consider pages from this window" },
+        limit: { type: "integer", minimum: 1, maximum: 10, description: "How many sources to draw on (default 5)" },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true, destructiveHint: false },
   },
   {
     name: "write_plan",
@@ -245,6 +263,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
 export const MCP_SERVER_INSTRUCTIONS = `OMP Web connector. Roles: you (the reviewer) read code, write a ticket plan and check results; OMP's foreman and workers execute it.
 Workflow: list_projects → project_overview → list_files / search_code / read_file → write_plan → request_dispatch → later get_runs + get_handoff (status.md) + git_diff to review → write a follow-up plan if needed.
 For UI work you can also look: view_image opens a mockup or a saved screenshot, and capture_page screenshots several pages at once — project HTML files, a local dev server, or the deployed site — full-page, at desktop and phone widths, so you can compare the built screen against the design one screen at a time.
+search_web answers from the web with its sources named, through the owner's own subscription, and defaults to Hong Kong HKDSE sources — use it before asserting anything about the exam, the curriculum or a library's current behaviour.
 Make tickets specific enough that workers need no investigation. Workers are cheap models; the plan is where the thinking goes.`;
 
 function directDispatch(): boolean {
@@ -345,6 +364,11 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
   if (name === "list_projects") {
     const projects = await listConnectorProjects();
     return ok(projects.map((project) => `- ${project.name}: ${project.path}${project.git ? "" : " (no git)"}`).join("\n") || "No projects.", { projects });
+  }
+
+  if (name === "search_web") {
+    const found = await searchWeb(args.query, { focus: args.focus, recency: args.recency, limit: args.limit });
+    return ok(found.text, { provider: found.provider, query: found.query });
   }
 
   const project = await resolveConnectorProject(args.project);
@@ -491,7 +515,7 @@ export async function callMcpTool(name: string, rawArgs: unknown): Promise<McpTo
     if (!MCP_TOOLS.some((tool) => tool.name === name)) return fail(`Unknown tool: ${name}`);
     return await handleTool(name, args);
   } catch (error) {
-    if (error instanceof ProjectAccessError || error instanceof DispatchError || error instanceof HandoffError) {
+    if (error instanceof ProjectAccessError || error instanceof DispatchError || error instanceof HandoffError || error instanceof WebSearchError) {
       return fail(error.message);
     }
     return fail(`Tool failed: ${error instanceof Error ? error.message : String(error)}`);

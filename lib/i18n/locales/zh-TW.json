@@ -1639,5 +1639,16 @@
   "dispatch.review": "交返 GPT 覆核",
   "dispatch.reviewCopied": "提示已複製",
   "dispatch.reviewHint": "{time} 做咗 {tickets}。睇完「進度」就可以交返去覆核。",
-  "dispatch.reviewPrompt": "OMP 已經喺專案 {project} 做完 {tickets}。請用 OMP Web connector：先讀交接嘅 status.md，再睇 git diff，逐張 ticket 對住計畫驗收。有問題或者漏咗嘢，就用 write_plan 用同一格式寫下一輪 ticket；冇問題就話我知可以 commit。"
+  "dispatch.reviewPrompt": "OMP 已經喺專案 {project} 做完 {tickets}。請用 OMP Web connector：先讀交接嘅 status.md，再睇 git diff，逐張 ticket 對住計畫驗收。有問題或者漏咗嘢，就用 write_plan 用同一格式寫下一輪 ticket；冇問題就話我知可以 commit。",
+  "dispatch.login.title": "已登入截圖",
+  "dispatch.login.howto": "喺呢部 Mac 開一次真瀏覽器登入，之後 capture_page 影嗰啲頁就係登入後嘅樣。",
+  "dispatch.login.placeholder": "orcagrade.com/login",
+  "dispatch.login.open": "開瀏覽器",
+  "dispatch.login.done": "我登入咗喇",
+  "dispatch.login.waiting": "瀏覽器開咗 — 登入完撳呢粒",
+  "dispatch.login.unfinished": "未完成",
+  "dispatch.login.saved": "{date} 儲存",
+  "dispatch.login.forget": "刪走呢個登入",
+  "dispatch.login.forgetConfirm": "刪走 {host} 嘅登入紀錄？連 cookie 一齊刪。",
+  "dispatch.login.warning": "登入紀錄淨係用喺自己嗰個網域，每次截圖都行喺一份用完即棄嘅副本上。但佢始終係你個戶口：用佢開嘅頁面等於你自己開。"
 }

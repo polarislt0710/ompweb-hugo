@@ -1638,5 +1638,16 @@
   "dispatch.review": "レビューに戻す",
   "dispatch.reviewCopied": "プロンプトをコピーしました",
   "dispatch.reviewHint": "{time} に {tickets} を実行しました。「進捗」を確認してからレビューに戻せます。",
-  "dispatch.reviewPrompt": "OMP がプロジェクト {project} で {tickets} を完了しました。OMP Web コネクタを使って、ハンドオフの status.md を読み、次に git diff を確認し、各チケットをプランと突き合わせて検収してください。問題や不足があれば write_plan で同じ形式の次のチケットを書いてください。問題なければコミットしてよいと伝えてください。"
+  "dispatch.reviewPrompt": "OMP がプロジェクト {project} で {tickets} を完了しました。OMP Web コネクタを使って、ハンドオフの status.md を読み、次に git diff を確認し、各チケットをプランと突き合わせて検収してください。問題や不足があれば write_plan で同じ形式の次のチケットを書いてください。問題なければコミットしてよいと伝えてください。",
+  "dispatch.login.title": "ログイン状態のスクリーンショット",
+  "dispatch.login.howto": "この Mac で実際のブラウザーから一度ログインすれば、capture_page はログイン後の画面を撮ります。",
+  "dispatch.login.placeholder": "orcagrade.com/login",
+  "dispatch.login.open": "ブラウザーを開く",
+  "dispatch.login.done": "ログインしました",
+  "dispatch.login.waiting": "ブラウザーを開いています — ログイン後にここを押す",
+  "dispatch.login.unfinished": "未完了",
+  "dispatch.login.saved": "{date} に保存",
+  "dispatch.login.forget": "このログインを削除",
+  "dispatch.login.forgetConfirm": "{host} の保存されたログインを削除しますか？ Cookie も削除されます。",
+  "dispatch.login.warning": "保存されたセッションはそのホストにのみ使われ、撮影のたびに使い捨てのコピー上で動きます。ただしあなたのアカウントであることに変わりはありません。"
 }

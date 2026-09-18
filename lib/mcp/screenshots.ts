@@ -18,7 +18,8 @@ import { lookup } from "dns/promises";
 import { readFileSync, statSync } from "fs";
 import { isIP } from "net";
 import { resolveChromeBinary } from "../chrome-path";
-import { captureAll, type CaptureRequest, type Viewport } from "./capture";
+import { captureAll, type CaptureRequest, type CaptureResult, type Viewport } from "./capture";
+import { captureProfileForHost, cloneProfileForCapture, touchCaptureProfile } from "./capture-profiles";
 import { ProjectAccessError, resolveReadablePath, type ConnectorProject } from "./project-files";
 
 /** ChatGPT has to carry the image in the conversation, so keep it small. */
@@ -143,22 +144,38 @@ async function assertUrlIsCapturable(raw: string): Promise<void> {
   }
 }
 
-async function resolveTarget(project: ConnectorProject, target: string): Promise<{ url: string; label: string }> {
+interface ResolvedTarget {
+  url: string;
+  label: string;
+  /** The saved signed-in session to open this page with, if the owner made one. */
+  profileSlug: string | null;
+}
+
+/** Only pages on a host the owner personally logged into get that session. */
+function sessionFor(rawUrl: string): string | null {
+  try {
+    return captureProfileForHost(new URL(rawUrl).hostname.toLowerCase())?.slug ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveTarget(project: ConnectorProject, target: string): Promise<ResolvedTarget> {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(target)) {
     await assertUrlIsCapturable(target);
-    return { url: target, label: target };
+    return { url: target, label: target, profileSlug: sessionFor(target) };
   }
   if (/^[\w.-]+\.[a-z]{2,}(\/|$)/i.test(target)) {
     // "orcagrade.com/pricing" — a site, written without the scheme.
     const url = `https://${target}`;
     await assertUrlIsCapturable(url);
-    return { url, label: url };
+    return { url, label: url, profileSlug: sessionFor(url) };
   }
   const { absolute, relative } = await resolveReadablePath(project, target);
   if (!/\.x?html?$/i.test(relative)) {
     throw new ProjectAccessError("invalid_argument", `${relative} is not an HTML file. Pass an .html file, a http://localhost:PORT URL, or a site address.`);
   }
-  return { url: `file://${absolute}`, label: relative };
+  return { url: `file://${absolute}`, label: relative, profileSlug: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +205,47 @@ function viewportsFor(options: CaptureOptions): Viewport[] {
 }
 
 /**
+ * Shoot each group of pages with the browser session it needs: one clean browser
+ * for ordinary pages, and one throwaway copy of a saved profile per signed-in
+ * host. Results come back in the order asked for, whichever browser took them.
+ */
+async function captureBySession(
+  chrome: string,
+  planned: ReadonlyArray<{ request: CaptureRequest; profileSlug: string | null }>,
+  options: { fullPage: boolean; waitMs: number },
+): Promise<Array<{ result: CaptureResult; signedIn: boolean }>> {
+  const groups = new Map<string, number[]>();
+  planned.forEach((shot, index) => {
+    const key = shot.profileSlug ?? "";
+    const list = groups.get(key);
+    if (list) list.push(index);
+    else groups.set(key, [index]);
+  });
+
+  const collected = new Array<{ result: CaptureResult; signedIn: boolean } | undefined>(planned.length);
+  for (const [slug, indexes] of groups) {
+    const requests = indexes.map((index) => planned[index].request);
+    let profile: { dir: string; dispose: () => void } | null = null;
+    try {
+      if (slug) {
+        profile = cloneProfileForCapture(slug);
+        touchCaptureProfile(slug);
+      }
+    } catch {
+      // The saved session is unusable (deleted by hand, disk full). Shoot the
+      // pages logged out rather than losing the whole comparison.
+      profile = null;
+    }
+    const shots = await captureAll(chrome, requests, { fullPage: options.fullPage, waitMs: options.waitMs, ...(profile ? { profileDir: profile.dir } : {}) })
+      .finally(() => profile?.dispose());
+    shots.forEach((result, position) => {
+      collected[indexes[position]] = { result, signedIn: Boolean(profile) };
+    });
+  }
+  return collected.filter((entry): entry is { result: CaptureResult; signedIn: boolean } => entry !== undefined);
+}
+
+/**
  * Screenshot one or more pages. Returns one image per target × viewport, in the
  * order asked for; a page that fails comes back as a note, not an exception, so
  * one dead URL cannot lose the rest of a comparison.
@@ -214,25 +272,29 @@ export async function capturePages(
   const waitMs = Math.min(10_000, Math.max(0, typeof options.waitMs === "number" ? Math.round(options.waitMs) : 1200));
 
   const notes: string[] = [];
-  const requests: CaptureRequest[] = [];
+  const planned: Array<{ request: CaptureRequest; profileSlug: string | null }> = [];
   for (const target of list) {
-    let resolved: { url: string; label: string };
+    let resolved: ResolvedTarget;
     try {
       resolved = await resolveTarget(project, target);
     } catch (error) {
       notes.push(`${target}: ${error instanceof Error ? error.message : String(error)}`);
       continue;
     }
-    for (const viewport of viewports) requests.push({ url: resolved.url, label: resolved.label, viewport });
+    for (const viewport of viewports) {
+      planned.push({ request: { url: resolved.url, label: resolved.label, viewport }, profileSlug: resolved.profileSlug });
+    }
   }
-  if (requests.length === 0) {
+  if (planned.length === 0) {
     throw new ProjectAccessError("denied", notes.join("; ") || "Nothing could be captured");
   }
 
+  const results = await captureBySession(chrome, planned, { fullPage, waitMs });
+
   const images: CapturedImage[] = [];
   let total = 0;
-  for (const result of await captureAll(chrome, requests, { fullPage, waitMs })) {
-    const where = `${result.label} (${result.viewport.name} ${result.viewport.width}px)`;
+  for (const { result, signedIn } of results) {
+    const where = `${result.label} (${result.viewport.name} ${result.viewport.width}px${signedIn ? ", signed in" : ""})`;
     if (result.error) {
       notes.push(`${where}: ${result.error}`);
       continue;

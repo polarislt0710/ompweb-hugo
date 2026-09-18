@@ -1638,5 +1638,16 @@
   "dispatch.review": "交回 GPT 复核",
   "dispatch.reviewCopied": "提示已复制",
   "dispatch.reviewHint": "{time} 执行了 {tickets}。看完「进度」就可以交回复核。",
-  "dispatch.reviewPrompt": "OMP 已经在项目 {project} 完成 {tickets}。请用 OMP Web connector：先读交接的 status.md，再看 git diff，逐张 ticket 对照计划验收。有问题或者漏了东西，就用 write_plan 用同样格式写下一轮 ticket；没问题就告诉我可以 commit。"
+  "dispatch.reviewPrompt": "OMP 已经在项目 {project} 完成 {tickets}。请用 OMP Web connector：先读交接的 status.md，再看 git diff，逐张 ticket 对照计划验收。有问题或者漏了东西，就用 write_plan 用同样格式写下一轮 ticket；没问题就告诉我可以 commit。",
+  "dispatch.login.title": "已登录截图",
+  "dispatch.login.howto": "在这台 Mac 上用真浏览器登录一次，之后 capture_page 拍那些页面就是登录后的样子。",
+  "dispatch.login.placeholder": "orcagrade.com/login",
+  "dispatch.login.open": "打开浏览器",
+  "dispatch.login.done": "我已登录",
+  "dispatch.login.waiting": "浏览器已打开 — 登录完点这里",
+  "dispatch.login.unfinished": "未完成",
+  "dispatch.login.saved": "{date} 保存",
+  "dispatch.login.forget": "删除这个登录",
+  "dispatch.login.forgetConfirm": "删除 {host} 的登录记录？其 cookie 一并删除。",
+  "dispatch.login.warning": "登录记录只用于它自己的域名，每次截图都在一份用完即弃的副本上运行。但它仍是你的账户：用它打开的页面等于你亲自打开。"
 }

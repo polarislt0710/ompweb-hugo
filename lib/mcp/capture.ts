@@ -142,9 +142,11 @@ async function pageWebSocketUrl(userDataDir: string, child: ChildProcess): Promi
 export async function captureAll(
   chromeBinary: string,
   requests: readonly CaptureRequest[],
-  options: { fullPage: boolean; waitMs: number },
+  options: { fullPage: boolean; waitMs: number; profileDir?: string },
 ): Promise<CaptureResult[]> {
-  const userDataDir = mkdtempSync(join(tmpdir(), "ompweb-capture-"));
+  // A profile directory carries a signed-in session and belongs to the caller,
+  // which disposes of it; without one the browser starts clean and throwaway.
+  const userDataDir = options.profileDir ?? mkdtempSync(join(tmpdir(), "ompweb-capture-"));
   const child = spawn(chromeBinary, [
     "--headless=new",
     "--remote-debugging-port=0",
@@ -220,6 +222,6 @@ export async function captureAll(
         delay(3000),
       ]);
     }
-    rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    if (!options.profileDir) rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 }

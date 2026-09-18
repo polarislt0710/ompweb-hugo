@@ -109,19 +109,41 @@ Settings → Apps → Developer mode → new app → paste the URL → auth **OA
   anywhere else. Changing `OMP_WEB_PASSWORD` revokes every connector token, and
   the Handoff tab has a disconnect button.
 - Tools: list projects, read/search files, git diff, read handoff, write
-  `plan.md`, request a dispatch, message a foreman. No shell, no source edits.
+  `plan.md`, request a dispatch, message a foreman, search the web. No shell,
+  no source edits.
 - Visual review (`lib/mcp/screenshots.ts`, `lib/mcp/capture.ts`): `view_image`
   returns a mockup or saved screenshot from the repo; `capture_page` drives one
   headless Chrome over DevTools to shoot up to 6 pages per call — project HTML
   files, a local dev server, or a deployed site — full-page, at desktop and/or
-  phone widths. It never starts a server or runs a project command, and pages
-  behind a login come back logged out.
+  phone widths. It never starts a server or runs a project command.
 - Capture targets are address-checked before the browser opens: loopback is
   allowed (the owner's dev server), every other host is resolved and refused if
   it lands on a private, link-local or otherwise internal address, so the
   connector cannot be turned into a way to reach the LAN. Set
   `OMP_WEB_MCP_CAPTURE_HOSTS=orcagrade.com,example.com` to narrow it to named
   sites; unset means any public host.
+- Signed-in screenshots (`lib/mcp/capture-profiles.ts`): pages behind a login
+  come back logged out unless a session was saved for that host. Handoff tab →
+  ChatGPT connector → *Signed-in screenshots*: type the login page, press
+  **Open browser**, log in by hand in the Chrome window that appears on this
+  Mac, press **I'm logged in**. The window is a real browser — no password is
+  typed into OMP Web or stored by it. The session lives in
+  `~/.omp/agent/ompweb-capture-profiles/<host>` (0700) and is used *only* for
+  that host and its subdomains; every capture runs on a throwaway copy, so a
+  captured page cannot change or end the saved session, and two captures never
+  fight over Chrome's profile lock. Shots taken this way are labelled
+  "signed in". It is a real session: a URL that acts on a GET would act as the
+  owner, so only give a profile to hosts that are safe to browse as yourself.
+  Forget one with the × next to it, which deletes its cookies.
+- Web search (`lib/mcp/web-search.ts`): `search_web` shells out to
+  `omp search`, so it runs on the owner's existing provider — Perplexity over
+  OAuth at the top of `providers.webSearchOrder` — and costs no model tokens.
+  Answers come back with their sources named. `focus` defaults to `hkdse`,
+  which prepends a preamble pinning the answer to Hong Kong exam sources
+  (hkeaa.edu.hk, edb.gov.hk, cd.edu.hk) instead of whatever syllabus ranks
+  highest worldwide; `focus: "web"` asks the question as written. Override the
+  provider with `OMP_WEB_SEARCH_PROVIDER` and the preamble with
+  `OMP_WEB_SEARCH_HKDSE_PREAMBLE`.
 - Only git repositories share source, and only files `git ls-files` would show
   (ignored files stay hidden), minus a secret-name denylist. Non-git projects
   share the handoff notes only.
