@@ -186,7 +186,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         width: { type: "integer", description: "Custom viewport width, 320-2000 (overrides viewport)" },
         height: { type: "integer", description: "Custom viewport height, 320-2000" },
         full_page: { type: "boolean", description: "Whole scrollable page (default true) or just the first screen" },
-        wait_ms: { type: "integer", description: "Extra time to let the page settle, up to 10000 (default 1200)" },
+        wait_ms: { type: "integer", description: "Extra time to let the page settle, up to 30000 (default 1200). A dashboard that fetches its data after load needs several seconds, or the shot is of a skeleton." },
       },
       required: ["project", "targets"],
       additionalProperties: false,

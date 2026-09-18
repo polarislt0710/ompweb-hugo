@@ -24,7 +24,7 @@ Options
   --width N         custom viewport width, overrides --viewport
   --height N        custom viewport height
   --no-full-page    just the first screen, not the whole page
-  --wait MS         extra settle time per page, up to 10000 (default 1200)
+  --wait MS         extra settle time per page, up to 30000 (default 1200)
   --json            print only the manifest JSON
 
 A host you saved a signed-in session for in OMP Web is captured signed in, and

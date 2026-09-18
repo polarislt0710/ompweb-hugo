@@ -295,7 +295,9 @@ export async function capturePages(
 
   const viewports = viewportsFor(options);
   const fullPage = options.fullPage !== false;
-  const waitMs = Math.min(10_000, Math.max(0, typeof options.waitMs === "number" ? Math.round(options.waitMs) : 1200));
+  // Real dashboards fetch their data after load; this app's student list takes
+  // over 20 seconds, and a short cap turns that into a screenshot of a skeleton.
+  const waitMs = Math.min(30_000, Math.max(0, typeof options.waitMs === "number" ? Math.round(options.waitMs) : 1200));
 
   const notes: string[] = [];
   const planned: Array<{ request: CaptureRequest; profileSlug: string | null }> = [];
