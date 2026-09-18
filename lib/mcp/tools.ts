@@ -18,7 +18,7 @@ import {
 import { HandoffError, readHandoffFiles, writeHandoffFile } from "../handoff";
 import { getSessionUsageBreakdown } from "../session-usage";
 import { parsePlan, PLAN_FORMAT_GUIDE } from "../work-plan";
-import { capturePage, readProjectImage, type CapturedImage } from "./screenshots";
+import { capturePages, readProjectImage, MAX_TARGETS, type CapturedImage } from "./screenshots";
 import {
   isSecretPath,
   listConnectorProjects,
@@ -170,18 +170,24 @@ export const MCP_TOOLS: McpToolDefinition[] = [
   },
   {
     name: "capture_page",
-    title: "Capture a page",
-    description: "Screenshot a page with headless Chrome and look at it. target is either an HTML file in the project (a mockup) or a URL on a dev server the owner is already running on this machine (http://localhost:PORT/path). This does not start a server: if nothing is running on that port, the capture fails. Use it to compare the built UI against the design.",
+    title: "Capture pages",
+    description: `Screenshot up to ${MAX_TARGETS} pages with headless Chrome and look at them. Each target is an HTML file in the project (a mockup), a page on a dev server the owner is already running here (http://localhost:PORT/path), or a deployed site (https://example.com/pricing). Full-page by default, and \`viewport: "both"\` returns a desktop and a phone shot of each page — made for comparing the built UI against the design, one screen at a time. It does not start a dev server, and pages behind a login come back logged out.`,
     inputSchema: {
       type: "object",
       properties: {
         project: projectProp,
-        target: { type: "string", description: "mockups/index.html or http://localhost:3000/dashboard" },
-        width: { type: "integer", description: "Viewport width, 320-2000 (default 1280). Use 390 for a phone." },
-        height: { type: "integer", description: "Viewport height, 320-2000 (default 900)" },
+        targets: {
+          type: "array",
+          items: { type: "string" },
+          description: `1-${MAX_TARGETS} pages, e.g. ["mockups/index.html", "https://example.com/dashboard"]`,
+        },
+        viewport: { type: "string", enum: ["desktop", "phone", "both"], description: "Default desktop (1280px). phone is 390px." },
+        width: { type: "integer", description: "Custom viewport width, 320-2000 (overrides viewport)" },
+        height: { type: "integer", description: "Custom viewport height, 320-2000" },
+        full_page: { type: "boolean", description: "Whole scrollable page (default true) or just the first screen" },
         wait_ms: { type: "integer", description: "Extra time to let the page settle, up to 10000 (default 1200)" },
       },
-      required: ["project", "target"],
+      required: ["project", "targets"],
       additionalProperties: false,
     },
     annotations: readOnly,
@@ -238,7 +244,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
 
 export const MCP_SERVER_INSTRUCTIONS = `OMP Web connector. Roles: you (the reviewer) read code, write a ticket plan and check results; OMP's foreman and workers execute it.
 Workflow: list_projects → project_overview → list_files / search_code / read_file → write_plan → request_dispatch → later get_runs + get_handoff (status.md) + git_diff to review → write a follow-up plan if needed.
-For UI work you can also look: view_image opens a mockup or a saved screenshot, and capture_page screenshots an HTML file or a running local dev server, so you can compare the built screen against the design.
+For UI work you can also look: view_image opens a mockup or a saved screenshot, and capture_page screenshots several pages at once — project HTML files, a local dev server, or the deployed site — full-page, at desktop and phone widths, so you can compare the built screen against the design one screen at a time.
 Make tickets specific enough that workers need no investigation. Workers are cheap models; the plan is where the thinking goes.`;
 
 function directDispatch(): boolean {
@@ -249,14 +255,15 @@ function ok(text: string, structured?: Record<string, unknown>): McpToolResult {
   return { content: [{ type: "text", text }], ...(structured ? { structuredContent: structured } : {}) };
 }
 
-/** An image plus one line saying what it is, so a client that drops images still shows something. */
-function image(shot: CapturedImage, caption: string): McpToolResult {
-  return {
-    content: [
-      { type: "text", text: `${caption} — ${shot.source}, ${(shot.bytes / 1024).toFixed(0)} KB` },
-      { type: "image", data: shot.data, mimeType: shot.mimeType },
-    ],
-  };
+/** Images, each with a line saying what it is, so a client that drops images still shows something. */
+function images(shots: readonly CapturedImage[], caption: string, notes: readonly string[] = []): McpToolResult {
+  const content: McpContent[] = [];
+  for (const shot of shots) {
+    content.push({ type: "text", text: `${caption} — ${shot.source}, ${(shot.bytes / 1024).toFixed(0)} KB` });
+    content.push({ type: "image", data: shot.data, mimeType: shot.mimeType });
+  }
+  if (notes.length > 0) content.push({ type: "text", text: `Not captured:\n- ${notes.join("\n- ")}` });
+  return { content };
 }
 
 function fail(text: string): McpToolResult {
@@ -391,13 +398,18 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
       return ok(await gitDiff(project, str(args, "base"), safeRelDir(str(args, "path"))));
 
     case "view_image":
-      return image(await readProjectImage(project, args.path), "Image");
+      return images([await readProjectImage(project, args.path)], "Image");
 
-    case "capture_page":
-      return image(
-        await capturePage(project, args.target, { width: args.width, height: args.height, waitMs: args.wait_ms }),
-        "Screenshot",
-      );
+    case "capture_page": {
+      const shots = await capturePages(project, args.targets ?? args.target, {
+        viewport: args.viewport,
+        width: args.width,
+        height: args.height,
+        fullPage: args.full_page,
+        waitMs: args.wait_ms,
+      });
+      return images(shots.images, "Screenshot", shots.notes);
+    }
 
     case "get_handoff": {
       const files = readHandoffFiles(project.path);

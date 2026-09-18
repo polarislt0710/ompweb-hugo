@@ -110,11 +110,18 @@ Settings → Apps → Developer mode → new app → paste the URL → auth **OA
   the Handoff tab has a disconnect button.
 - Tools: list projects, read/search files, git diff, read handoff, write
   `plan.md`, request a dispatch, message a foreman. No shell, no source edits.
-- Visual review (`lib/mcp/screenshots.ts`): `view_image` returns a mockup or a
-  saved screenshot from the repo, and `capture_page` screenshots an HTML file in
-  the project or a dev server already running on this machine (localhost only,
-  and it refuses instead of photographing Chrome's error page when nothing
-  answers). It never starts a server or runs a project command.
+- Visual review (`lib/mcp/screenshots.ts`, `lib/mcp/capture.ts`): `view_image`
+  returns a mockup or saved screenshot from the repo; `capture_page` drives one
+  headless Chrome over DevTools to shoot up to 6 pages per call — project HTML
+  files, a local dev server, or a deployed site — full-page, at desktop and/or
+  phone widths. It never starts a server or runs a project command, and pages
+  behind a login come back logged out.
+- Capture targets are address-checked before the browser opens: loopback is
+  allowed (the owner's dev server), every other host is resolved and refused if
+  it lands on a private, link-local or otherwise internal address, so the
+  connector cannot be turned into a way to reach the LAN. Set
+  `OMP_WEB_MCP_CAPTURE_HOSTS=orcagrade.com,example.com` to narrow it to named
+  sites; unset means any public host.
 - Only git repositories share source, and only files `git ls-files` would show
   (ignored files stay hidden), minus a secret-name denylist. Non-git projects
   share the handoff notes only.

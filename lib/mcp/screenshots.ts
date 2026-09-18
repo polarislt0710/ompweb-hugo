@@ -1,29 +1,35 @@
 // Eyes for the reviewer: hand ChatGPT an image of a screen instead of only the
 // markup behind it.
 //
-// Two sources, both narrow on purpose:
+// Three sources:
 // - an image file already in the project (a design mockup, a saved screenshot);
-// - a headless Chrome shot of a page that is already reachable: an HTML file in
-//   the project, or a dev server the owner started on this machine.
+// - an HTML file in the project, or a dev server the owner started here;
+// - a public site the owner deployed (orcagrade.com and friends).
 //
-// Nothing here starts a dev server or runs a project command; Chrome is spawned
-// with a fixed argument list and a throwaway profile.
+// The last one is why the address checks matter. A screenshot tool that will
+// fetch any host is a way to reach private networks from this machine, so every
+// target's address is resolved first and anything private, loopback (unless it
+// is an explicit localhost dev server), link-local or otherwise internal is
+// refused. OMP_WEB_MCP_CAPTURE_HOSTS narrows it further to named hosts.
+//
+// Nothing here starts a dev server or runs a project command.
 
-import { execFile } from "child_process";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
-import { promisify } from "util";
+import { lookup } from "dns/promises";
+import { readFileSync, statSync } from "fs";
+import { isIP } from "net";
 import { resolveChromeBinary } from "../chrome-path";
+import { captureAll, type CaptureRequest, type Viewport } from "./capture";
 import { ProjectAccessError, resolveReadablePath, type ConnectorProject } from "./project-files";
-
-const execFileAsync = promisify(execFile);
 
 /** ChatGPT has to carry the image in the conversation, so keep it small. */
 export const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
-const CAPTURE_TIMEOUT_MS = 45_000;
-const MIN_SIDE = 320;
-const MAX_SIDE = 2000;
+export const MAX_TARGETS = 6;
+export const MAX_TOTAL_IMAGE_BYTES = 12 * 1024 * 1024;
+
+export const VIEWPORTS: Record<string, Viewport> = {
+  desktop: { name: "desktop", width: 1280, height: 900, mobile: false },
+  phone: { name: "phone", width: 390, height: 844, mobile: true },
+};
 
 const IMAGE_TYPES: Record<string, string> = {
   ".png": "image/png",
@@ -35,11 +41,10 @@ const IMAGE_TYPES: Record<string, string> = {
 };
 
 export interface CapturedImage {
-  /** Base64 for the MCP image content block. */
   data: string;
   mimeType: string;
   bytes: number;
-  /** What was captured, for the accompanying text line. */
+  /** What was captured, for the line that accompanies the picture. */
   source: string;
 }
 
@@ -63,105 +68,184 @@ export async function readProjectImage(project: ConnectorProject, rawPath: unkno
   return { data: readFileSync(absolute).toString("base64"), mimeType, bytes: stat.size, source: relative };
 }
 
-/**
- * Where a capture may point. A local dev server is the owner's own process; any
- * other host would turn the connector into a way to fetch private network pages.
- */
-function isAllowedLocalUrl(value: string): boolean {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
-  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+// ---------------------------------------------------------------------------
+// Where a capture may point
+// ---------------------------------------------------------------------------
+
+function isLoopbackHost(host: string): boolean {
   return host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".localhost");
 }
 
-async function resolveTarget(project: ConnectorProject, target: string): Promise<{ url: string; source: string }> {
-  if (/^[a-z][a-z0-9+.-]*:/i.test(target)) {
-    if (!isAllowedLocalUrl(target)) {
-      throw new ProjectAccessError("denied", "Only a local dev server (localhost or 127.0.0.1) or an HTML file inside the project can be captured.");
+/** Addresses that must never be reachable through this tool. */
+export function isPrivateAddress(address: string): boolean {
+  const version = isIP(address);
+  if (version === 4) {
+    const [a, b] = address.split(".").map(Number);
+    if (a === 10 || a === 127 || a === 0) return true;
+    if (a === 169 && b === 254) return true; // link-local, incl. cloud metadata
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true; // carrier-grade NAT
+    if (a >= 224) return true; // multicast and reserved
+    return false;
+  }
+  if (version === 6) {
+    const value = address.toLowerCase();
+    if (value === "::" || value === "::1") return true;
+    if (value.startsWith("fe80") || value.startsWith("fc") || value.startsWith("fd")) return true;
+    // IPv4-mapped (::ffff:10.0.0.1)
+    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(value);
+    if (mapped) return isPrivateAddress(mapped[1]);
+    return false;
+  }
+  return true;
+}
+
+function allowedHostList(): string[] {
+  return (process.env.OMP_WEB_MCP_CAPTURE_HOSTS ?? "")
+    .split(",")
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function hostAllowedByConfig(host: string): boolean {
+  const allowed = allowedHostList();
+  if (allowed.length === 0) return true; // unset: any public host
+  return allowed.some((entry) => (entry.startsWith("*.") ? host.endsWith(entry.slice(1)) : host === entry || host.endsWith(`.${entry}`)));
+}
+
+/** Refuse before the browser ever opens: private networks, and hosts the owner excluded. */
+async function assertUrlIsCapturable(raw: string): Promise<void> {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new ProjectAccessError("invalid_argument", `${raw} is not a valid URL`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new ProjectAccessError("denied", "Only http and https pages can be captured.");
+  }
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (isLoopbackHost(host)) return; // the owner's own dev server
+
+  if (!hostAllowedByConfig(host)) {
+    throw new ProjectAccessError("denied", `${host} is not in OMP_WEB_MCP_CAPTURE_HOSTS, so it cannot be captured.`);
+  }
+  const addresses = isIP(host)
+    ? [{ address: host }]
+    : await lookup(host, { all: true }).catch(() => {
+      throw new ProjectAccessError("not_found", `${host} does not resolve from this machine.`);
+    });
+  for (const { address } of addresses) {
+    if (isPrivateAddress(address)) {
+      throw new ProjectAccessError("denied", `${host} resolves to a private address (${address}); only public sites and your own dev server can be captured.`);
     }
-    return { url: target, source: target };
+  }
+}
+
+async function resolveTarget(project: ConnectorProject, target: string): Promise<{ url: string; label: string }> {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(target)) {
+    await assertUrlIsCapturable(target);
+    return { url: target, label: target };
+  }
+  if (/^[\w.-]+\.[a-z]{2,}(\/|$)/i.test(target)) {
+    // "orcagrade.com/pricing" — a site, written without the scheme.
+    const url = `https://${target}`;
+    await assertUrlIsCapturable(url);
+    return { url, label: url };
   }
   const { absolute, relative } = await resolveReadablePath(project, target);
   if (!/\.x?html?$/i.test(relative)) {
-    throw new ProjectAccessError("invalid_argument", `${relative} is not an HTML file. Pass an .html file or a http://localhost:PORT URL.`);
+    throw new ProjectAccessError("invalid_argument", `${relative} is not an HTML file. Pass an .html file, a http://localhost:PORT URL, or a site address.`);
   }
-  return { url: `file://${absolute}`, source: relative };
+  return { url: `file://${absolute}`, label: relative };
 }
 
-function clampSide(value: unknown, fallback: number): number {
-  const number = typeof value === "number" && Number.isFinite(value) ? Math.round(value) : fallback;
-  return Math.min(MAX_SIDE, Math.max(MIN_SIDE, number));
+// ---------------------------------------------------------------------------
+// Capture
+// ---------------------------------------------------------------------------
+
+export interface CaptureOptions {
+  viewport?: unknown;
+  width?: unknown;
+  height?: unknown;
+  fullPage?: unknown;
+  waitMs?: unknown;
 }
 
-/** One-shot headless screenshot. Chrome renders, writes a PNG, and exits. */
-export async function capturePage(
+function viewportsFor(options: CaptureOptions): Viewport[] {
+  const width = typeof options.width === "number" ? Math.round(options.width) : null;
+  const height = typeof options.height === "number" ? Math.round(options.height) : null;
+  if (width || height) {
+    const clamp = (value: number | null, fallback: number) => Math.min(2000, Math.max(320, value ?? fallback));
+    const custom = { name: "custom", width: clamp(width, 1280), height: clamp(height, 900), mobile: clamp(width, 1280) < 768 };
+    return [custom];
+  }
+  const choice = typeof options.viewport === "string" ? options.viewport.toLowerCase() : "desktop";
+  if (choice === "both") return [VIEWPORTS.desktop, VIEWPORTS.phone];
+  if (choice === "phone" || choice === "mobile") return [VIEWPORTS.phone];
+  return [VIEWPORTS.desktop];
+}
+
+/**
+ * Screenshot one or more pages. Returns one image per target × viewport, in the
+ * order asked for; a page that fails comes back as a note, not an exception, so
+ * one dead URL cannot lose the rest of a comparison.
+ */
+export async function capturePages(
   project: ConnectorProject,
-  target: unknown,
-  options: { width?: unknown; height?: unknown; waitMs?: unknown } = {},
-): Promise<CapturedImage> {
-  if (typeof target !== "string" || !target.trim()) {
-    throw new ProjectAccessError("invalid_argument", "target is required: an HTML file in the project, or a http://localhost:PORT URL");
+  rawTargets: unknown,
+  options: CaptureOptions = {},
+): Promise<{ images: CapturedImage[]; notes: string[] }> {
+  const list = (Array.isArray(rawTargets) ? rawTargets : [rawTargets])
+    .filter((target): target is string => typeof target === "string" && target.trim().length > 0)
+    .map((target) => target.trim());
+  if (list.length === 0) {
+    throw new ProjectAccessError("invalid_argument", "targets is required: HTML files in the project, http://localhost:PORT URLs, or site addresses");
+  }
+  if (list.length > MAX_TARGETS) {
+    throw new ProjectAccessError("invalid_argument", `At most ${MAX_TARGETS} targets per call; split the comparison.`);
   }
   const chrome = resolveChromeBinary();
   if (!chrome) throw new ProjectAccessError("not_found", "No Chrome, Chromium or Edge found on this machine, so pages cannot be captured.");
 
-  const { url, source } = await resolveTarget(project, target.trim());
-  // Chrome happily screenshots its own "connection refused" page, which reads
-  // like a broken UI. Check the server is actually there first.
-  if (url.startsWith("http")) {
-    try {
-      await fetch(url, { method: "GET", signal: AbortSignal.timeout(5000), redirect: "manual" });
-    } catch {
-      throw new ProjectAccessError("not_found", `Nothing answered at ${url}. Start the dev server on this machine first, then capture again.`);
-    }
-  }
-  const width = clampSide(options.width, 1280);
-  const height = clampSide(options.height, 900);
+  const viewports = viewportsFor(options);
+  const fullPage = options.fullPage !== false;
   const waitMs = Math.min(10_000, Math.max(0, typeof options.waitMs === "number" ? Math.round(options.waitMs) : 1200));
 
-  const workDir = mkdtempSync(join(tmpdir(), "ompweb-capture-"));
-  const shot = join(workDir, "page.png");
-  try {
-    await execFileAsync(chrome, [
-      "--headless=new",
-      "--disable-gpu",
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--disable-extensions",
-      "--hide-scrollbars",
-      `--user-data-dir=${join(workDir, "profile")}`,
-      `--window-size=${width},${height}`,
-      `--virtual-time-budget=${waitMs + 3000}`,
-      `--screenshot=${shot}`,
-      url,
-    ], { timeout: CAPTURE_TIMEOUT_MS, maxBuffer: 1024 * 1024 });
-
-    const stat = statSync(shot);
-    if (stat.size > MAX_IMAGE_BYTES) {
-      throw new ProjectAccessError("too_large", "The screenshot is too large; capture a smaller viewport.");
+  const notes: string[] = [];
+  const requests: CaptureRequest[] = [];
+  for (const target of list) {
+    let resolved: { url: string; label: string };
+    try {
+      resolved = await resolveTarget(project, target);
+    } catch (error) {
+      notes.push(`${target}: ${error instanceof Error ? error.message : String(error)}`);
+      continue;
     }
-    return { data: readFileSync(shot).toString("base64"), mimeType: "image/png", bytes: stat.size, source: `${source} (${width}×${height})` };
-  } catch (error) {
-    if (error instanceof ProjectAccessError) throw error;
-    const message = error instanceof Error ? error.message : String(error);
-    if (/ENOENT/.test(message) && !statSafe(shot)) {
-      throw new ProjectAccessError("not_found", `Nothing was rendered for ${source}. If it is a dev server, make sure it is running on this machine.`);
-    }
-    throw new ProjectAccessError("invalid_argument", `Capture failed: ${message.slice(0, 200)}`);
-  } finally {
-    rmSync(workDir, { recursive: true, force: true });
+    for (const viewport of viewports) requests.push({ url: resolved.url, label: resolved.label, viewport });
   }
-}
+  if (requests.length === 0) {
+    throw new ProjectAccessError("denied", notes.join("; ") || "Nothing could be captured");
+  }
 
-function statSafe(path: string): boolean {
-  try {
-    return statSync(path).isFile();
-  } catch {
-    return false;
+  const images: CapturedImage[] = [];
+  let total = 0;
+  for (const result of await captureAll(chrome, requests, { fullPage, waitMs })) {
+    const where = `${result.label} (${result.viewport.name} ${result.viewport.width}px)`;
+    if (result.error) {
+      notes.push(`${where}: ${result.error}`);
+      continue;
+    }
+    if (result.png.byteLength > MAX_IMAGE_BYTES || total + result.png.byteLength > MAX_TOTAL_IMAGE_BYTES) {
+      notes.push(`${where}: the image is too large to send; capture fewer pages or a narrower viewport.`);
+      continue;
+    }
+    total += result.png.byteLength;
+    images.push({ data: result.png.toString("base64"), mimeType: "image/png", bytes: result.png.byteLength, source: where });
   }
+  if (images.length === 0) {
+    throw new ProjectAccessError("not_found", notes.join("; ") || "Nothing was captured");
+  }
+  return { images, notes };
 }
