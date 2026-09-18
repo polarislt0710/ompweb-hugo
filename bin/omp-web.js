@@ -20,6 +20,22 @@ if (process.argv[2] === "ompweb-launchd" || process.argv[2] === "launchd") {
   process.exit(status ?? 1);
 }
 
+// `ompweb capture <target...>` — screenshots from a shell, so the agents that
+// execute a plan can do the "capture these pages" tickets the reviewer writes.
+if (process.argv[2] === "capture") {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { join } = require("node:path");
+  const packageRoot = join(__dirname, "..");
+  import(join(packageRoot, "scripts/capture-cli.mjs"))
+    .then(({ runCaptureCli }) => runCaptureCli(process.argv.slice(3), packageRoot))
+    .then((code) => process.exit(code))
+    .catch((error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    });
+  return;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { spawn } = require("node:child_process");
 // eslint-disable-next-line @typescript-eslint/no-require-imports

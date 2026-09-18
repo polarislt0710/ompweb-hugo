@@ -47,6 +47,10 @@ export interface CapturedImage {
   bytes: number;
   /** What was captured, for the line that accompanies the picture. */
   source: string;
+  /** Where the browser ended up, when that is not where it was sent. */
+  redirectedTo?: string;
+  /** The page's HTTP status, when it was not 200. */
+  status?: number;
 }
 
 function imageTypeFor(path: string): string | null {
@@ -149,6 +153,17 @@ interface ResolvedTarget {
   label: string;
   /** The saved signed-in session to open this page with, if the owner made one. */
   profileSlug: string | null;
+}
+
+function requestedUrl(label: string): string {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(label) ? label : "";
+}
+
+/** Same page, ignoring a trailing slash and the fragment. */
+function sameUrl(a: string, b: string): boolean {
+  if (!b) return true; // a project file: there is nothing to compare against
+  const strip = (value: string) => value.replace(/#.*$/, "").replace(/\/$/, "");
+  return strip(a) === strip(b);
 }
 
 /** Only pages on a host the owner personally logged into get that session. */
@@ -315,7 +330,19 @@ export async function capturePages(
       continue;
     }
     total += result.png.byteLength;
-    images.push({ data: result.png.toString("base64"), mimeType: "image/png", bytes: result.png.byteLength, source: where });
+    // A capture that quietly lands on a login page is the failure that looks
+    // most like an answer, so the redirect travels with the picture.
+    const redirected = result.finalUrl && !sameUrl(result.finalUrl, requestedUrl(result.label)) ? result.finalUrl : undefined;
+    const bad = typeof result.status === "number" && result.status >= 400 ? result.status : undefined;
+    const suffix = [bad ? `HTTP ${bad}` : "", redirected ? `redirected to ${redirected}` : ""].filter(Boolean).join(", ");
+    images.push({
+      data: result.png.toString("base64"),
+      mimeType: "image/png",
+      bytes: result.png.byteLength,
+      source: suffix ? `${where} — ${suffix}` : where,
+      ...(redirected ? { redirectedTo: redirected } : {}),
+      ...(bad ? { status: bad } : {}),
+    });
   }
   if (images.length === 0) {
     throw new ProjectAccessError("not_found", notes.join("; ") || "Nothing was captured");

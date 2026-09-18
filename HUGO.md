@@ -148,6 +148,14 @@ Settings → Apps → Developer mode → new app → paste the URL → auth **OA
   "signed in". It is a real session: a URL that acts on a GET would act as the
   owner, so only give a profile to hosts that are safe to browse as yourself.
   Forget one with the × next to it, which deletes its cookies.
+- `ompweb capture <target...>` (`scripts/capture-cli.mjs`) is the same capture
+  from a shell, because an omp worker has only bash: a plan that says "capture
+  these three pages" had no way to be carried out otherwise. It writes PNGs plus
+  a `captures.json` manifest, uses the saved signed-in session for that host, and
+  exits 2 when anything redirected or returned 4xx. Every shot — here and over
+  the connector — records the URL the browser actually landed on and the main
+  document's HTTP status, so a 404 page or a silent bounce to the login screen
+  cannot pass as the screen that was asked for.
 - Web search (`lib/mcp/web-search.ts`): `search_web` shells out to
   `omp search`, so it runs on the owner's existing provider — Perplexity over
   OAuth at the top of `providers.webSearchOrder` — and costs no model tokens.

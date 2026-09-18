@@ -240,13 +240,14 @@ cmd_open() {
 
 usage() {
   cat <<EOF
-Usage: ompweb [restart|start|stop|status|open|serve|install-service|uninstall-service]
+Usage: ompweb [restart|start|stop|status|open|capture|serve|install-service|uninstall-service]
 
   restart            Stop and start this fork on $URL (default)
   start              Start if needed, keep the existing process
   stop               Unload launchd and free port $PORT
   status             Local + public health
   open               Open $URL in the browser
+  capture            Screenshot pages (signed in, when a session was saved)
   serve              Foreground next-dev (used by launchd)
   install-service    Install login LaunchAgent
   uninstall-service  Remove login LaunchAgent
@@ -257,7 +258,14 @@ Homebrew \`ompweb\` is stock @kahme247/ompweb and is shadowed on PATH.
 EOF
 }
 
+# Screenshots from a shell, so the agents executing a plan can do the
+# "capture these pages" tickets. Arguments pass straight through.
+cmd_capture() {
+  node "$ROOT/bin/omp-web.js" capture "$@"
+}
+
 case "$cmd" in
+  capture) shift; cmd_capture "$@" ;;
   serve) cmd_serve ;;
   install-service) cmd_install_service ;;
   uninstall-service) cmd_uninstall_service ;;

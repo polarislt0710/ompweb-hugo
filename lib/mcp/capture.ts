@@ -55,6 +55,13 @@ export interface CaptureResult {
   label: string;
   viewport: Viewport;
   png: Buffer;
+  /** The main document's HTTP status. 404 and 403 render a page like any other,
+   * and a screenshot of one is not a screenshot of the screen that was asked for. */
+  status?: number;
+  /** Where the browser actually ended up. A redirect to a login page is the
+   * failure that most looks like success, so it is always reported. */
+  finalUrl?: string;
+  title?: string;
   /** Set when the page did not load; the caller reports it instead of a picture. */
   error?: string;
 }
@@ -68,6 +75,7 @@ export class DevTools {
   private nextId = 1;
   private readonly pending = new Map<number, { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void }>();
   private readonly waiters = new Map<string, Array<() => void>>();
+  private readonly listeners = new Map<string, (params: Record<string, unknown>) => void>();
 
   private constructor(private readonly socket: WebSocket) {}
 
@@ -100,6 +108,7 @@ export class DevTools {
       return;
     }
     const method = typeof message.method === "string" ? message.method : "";
+    this.listeners.get(method)?.((message.params as Record<string, unknown>) ?? {});
     for (const resolve of this.waiters.get(method) ?? []) resolve();
     this.waiters.delete(method);
   }
@@ -110,6 +119,11 @@ export class DevTools {
       this.pending.set(id, { resolve, reject });
       this.socket.send(JSON.stringify({ id, method, params }));
     });
+  }
+
+  /** Watch every occurrence of an event. One handler per method is enough here. */
+  on(method: string, handler: (params: Record<string, unknown>) => void): void {
+    this.listeners.set(method, handler);
   }
 
   /** Resolves on the next occurrence of a DevTools event, or on timeout. */
@@ -233,6 +247,14 @@ export async function captureAll(
   try {
     page = await DevTools.connect(await pageWebSocketUrl(userDataDir, child));
     await page.send("Page.enable");
+    await page.send("Network.enable");
+    // The first document response after each navigation is the page itself.
+    let documentStatus: number | null = null;
+    page.on("Network.responseReceived", (params) => {
+      if (documentStatus !== null || params.type !== "Document") return;
+      const response = params.response as { status?: number } | undefined;
+      if (typeof response?.status === "number") documentStatus = response.status;
+    });
     if (options.session) await restoreSession(page, options.session);
 
     for (const request of requests) {
@@ -245,6 +267,7 @@ export async function captureAll(
         });
         // Chrome renders its own error page for a refused connection, which
         // would come back looking like a broken UI; errorText is the honest signal.
+        documentStatus = null;
         const navigation = await page.send("Page.navigate", { url: request.url }) as { errorText?: string };
         if (navigation.errorText) throw new Error(`${navigation.errorText} — nothing answered at ${request.url}`);
         await page.once("Page.loadEventFired", LOAD_TIMEOUT_MS);
@@ -268,7 +291,19 @@ export async function captureAll(
           format: "png",
           ...(clip ? { clip, captureBeyondViewport: true } : {}),
         }) as { data: string };
-        results.push({ label: request.label, viewport: request.viewport, png: Buffer.from(shot.data, "base64") });
+        const landed = await page.send("Runtime.evaluate", {
+          expression: "JSON.stringify({ url: location.href, title: document.title })",
+          returnByValue: true,
+        }).catch(() => ({})) as { result?: { value?: string } };
+        const where = JSON.parse(landed.result?.value ?? "{}") as { url?: string; title?: string };
+        results.push({
+          label: request.label,
+          viewport: request.viewport,
+          png: Buffer.from(shot.data, "base64"),
+          finalUrl: where.url,
+          title: where.title,
+          ...(documentStatus !== null ? { status: documentStatus } : {}),
+        });
       } catch (error) {
         results.push({
           label: request.label,
