@@ -18,6 +18,7 @@ import {
 import { HandoffError, readHandoffFiles, writeHandoffFile } from "../handoff";
 import { getSessionUsageBreakdown } from "../session-usage";
 import { parsePlan, PLAN_FORMAT_GUIDE } from "../work-plan";
+import { capturePage, readProjectImage, type CapturedImage } from "./screenshots";
 import {
   isSecretPath,
   listConnectorProjects,
@@ -37,8 +38,12 @@ export interface McpToolDefinition {
   annotations: { readOnlyHint: boolean; destructiveHint?: boolean; openWorldHint?: boolean; idempotentHint?: boolean };
 }
 
+export type McpContent =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType: string };
+
 export interface McpToolResult {
-  content: Array<{ type: "text"; text: string }>;
+  content: McpContent[];
   structuredContent?: Record<string, unknown>;
   isError?: boolean;
 }
@@ -149,6 +154,39 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     annotations: readOnly,
   },
   {
+    name: "view_image",
+    title: "View an image",
+    description: "Look at an image already in the project: a design mockup, an exported screen, a saved screenshot. PNG, JPG, GIF, WebP or AVIF, up to 4 MB.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project: projectProp,
+        path: { type: "string", description: "Path to the image, relative to the project root" },
+      },
+      required: ["project", "path"],
+      additionalProperties: false,
+    },
+    annotations: readOnly,
+  },
+  {
+    name: "capture_page",
+    title: "Capture a page",
+    description: "Screenshot a page with headless Chrome and look at it. target is either an HTML file in the project (a mockup) or a URL on a dev server the owner is already running on this machine (http://localhost:PORT/path). This does not start a server: if nothing is running on that port, the capture fails. Use it to compare the built UI against the design.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project: projectProp,
+        target: { type: "string", description: "mockups/index.html or http://localhost:3000/dashboard" },
+        width: { type: "integer", description: "Viewport width, 320-2000 (default 1280). Use 390 for a phone." },
+        height: { type: "integer", description: "Viewport height, 320-2000 (default 900)" },
+        wait_ms: { type: "integer", description: "Extra time to let the page settle, up to 10000 (default 1200)" },
+      },
+      required: ["project", "target"],
+      additionalProperties: false,
+    },
+    annotations: readOnly,
+  },
+  {
     name: "write_plan",
     title: "Write plan",
     description: `Save the reviewed plan to .omp/handoff/plan.md so OMP workers can execute it. The plan is validated first; nothing is written if it has errors. Optionally also replace decisions.md.\n\n${PLAN_FORMAT_GUIDE}`,
@@ -200,6 +238,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
 
 export const MCP_SERVER_INSTRUCTIONS = `OMP Web connector. Roles: you (the reviewer) read code, write a ticket plan and check results; OMP's foreman and workers execute it.
 Workflow: list_projects → project_overview → list_files / search_code / read_file → write_plan → request_dispatch → later get_runs + get_handoff (status.md) + git_diff to review → write a follow-up plan if needed.
+For UI work you can also look: view_image opens a mockup or a saved screenshot, and capture_page screenshots an HTML file or a running local dev server, so you can compare the built screen against the design.
 Make tickets specific enough that workers need no investigation. Workers are cheap models; the plan is where the thinking goes.`;
 
 function directDispatch(): boolean {
@@ -208,6 +247,16 @@ function directDispatch(): boolean {
 
 function ok(text: string, structured?: Record<string, unknown>): McpToolResult {
   return { content: [{ type: "text", text }], ...(structured ? { structuredContent: structured } : {}) };
+}
+
+/** An image plus one line saying what it is, so a client that drops images still shows something. */
+function image(shot: CapturedImage, caption: string): McpToolResult {
+  return {
+    content: [
+      { type: "text", text: `${caption} — ${shot.source}, ${(shot.bytes / 1024).toFixed(0)} KB` },
+      { type: "image", data: shot.data, mimeType: shot.mimeType },
+    ],
+  };
 }
 
 function fail(text: string): McpToolResult {
@@ -340,6 +389,15 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
 
     case "git_diff":
       return ok(await gitDiff(project, str(args, "base"), safeRelDir(str(args, "path"))));
+
+    case "view_image":
+      return image(await readProjectImage(project, args.path), "Image");
+
+    case "capture_page":
+      return image(
+        await capturePage(project, args.target, { width: args.width, height: args.height, waitMs: args.wait_ms }),
+        "Screenshot",
+      );
 
     case "get_handoff": {
       const files = readHandoffFiles(project.path);

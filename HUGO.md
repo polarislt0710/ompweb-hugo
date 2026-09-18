@@ -110,6 +110,11 @@ Settings → Apps → Developer mode → new app → paste the URL → auth **OA
   the Handoff tab has a disconnect button.
 - Tools: list projects, read/search files, git diff, read handoff, write
   `plan.md`, request a dispatch, message a foreman. No shell, no source edits.
+- Visual review (`lib/mcp/screenshots.ts`): `view_image` returns a mockup or a
+  saved screenshot from the repo, and `capture_page` screenshots an HTML file in
+  the project or a dev server already running on this machine (localhost only,
+  and it refuses instead of photographing Chrome's error page when nothing
+  answers). It never starts a server or runs a project command.
 - Only git repositories share source, and only files `git ls-files` would show
   (ignored files stay hidden), minus a secret-name denylist. Non-git projects
   share the handoff notes only.
