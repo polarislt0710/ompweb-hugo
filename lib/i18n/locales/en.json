@@ -1653,5 +1653,7 @@
   "dispatch.login.kept": "Kept {count} cookies. capture_page will shoot this host signed in.",
   "dispatch.login.keptNone": "Nothing was kept — the login window was already closed. Open it again and press this before closing it.",
   "handoff.read": "Read",
-  "handoff.edit": "Edit"
+  "handoff.edit": "Edit",
+  "dispatch.batch.label": "Run ({done}/{total} dispatched)",
+  "dispatch.batch.hint": "Which tickets this run takes. Plan order by default; edit to run a phase."
 }

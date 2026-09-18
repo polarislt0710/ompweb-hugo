@@ -10,6 +10,7 @@ import {
   startDispatch,
 } from "@/lib/dispatch";
 import { WebRpcError } from "@/lib/rpc-manager";
+import { suggestDispatchBatch } from "@/lib/work-plan";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,14 @@ export async function GET(request: NextRequest) {
     if ("response" in resolved) return resolved.response;
     const { plan } = readProjectPlan(resolved.cwd);
     const planFile = readHandoffFiles(resolved.cwd).find((file) => file.name === "plan.md");
-    return NextResponse.json({ plan, planModifiedAt: planFile?.modifiedAt ?? null, ...listDispatchState(resolved.cwd) });
+    const state = listDispatchState(resolved.cwd);
+    const batchSize = Number.parseInt(process.env.OMP_WEB_DISPATCH_BATCH ?? "", 10);
+    return NextResponse.json({
+      plan,
+      planModifiedAt: planFile?.modifiedAt ?? null,
+      ...state,
+      suggested: suggestDispatchBatch(plan, state.dispatchedIds, Number.isFinite(batchSize) ? batchSize : undefined),
+    });
   } catch (error) {
     return errorResponse(error);
   }

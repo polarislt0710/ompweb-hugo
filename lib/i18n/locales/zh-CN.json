@@ -1653,5 +1653,7 @@
   "dispatch.login.kept": "已保存 {count} 个 cookie，capture_page 拍这个域名会是登录后的样子。",
   "dispatch.login.keptNone": "什么都没保存 —— 登录窗口已经关掉了。重新打开一次，关闭前先点这里。",
   "handoff.read": "阅读",
-  "handoff.edit": "编辑"
+  "handoff.edit": "编辑",
+  "dispatch.batch.label": "本次运行（已派 {done}/{total}）",
+  "dispatch.batch.hint": "本次派哪几张票。默认按计划顺序，可改成一个阶段。"
 }

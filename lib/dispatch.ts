@@ -201,12 +201,16 @@ export function dispatchRunState(run: DispatchRun): DispatchRunState {
 export function listDispatchState(cwd?: string): {
   runs: Array<DispatchRun & { state: DispatchRunState }>;
   requests: DispatchRequest[];
+  /** Every ticket a run in this project has already taken, newest run included. */
+  dispatchedIds: string[];
 } {
   const store = loadDispatchStore();
   const inProject = <T extends { cwd: string }>(entry: T) => !cwd || entry.cwd === cwd;
+  const mine = store.runs.filter(inProject);
   return {
-    runs: store.runs.filter(inProject).reverse().slice(0, 10).map((run) => ({ ...run, state: dispatchRunState(run) })),
+    runs: mine.slice().reverse().slice(0, 10).map((run) => ({ ...run, state: dispatchRunState(run) })),
     requests: store.requests.filter(inProject).reverse().slice(0, 10),
+    dispatchedIds: [...new Set(mine.flatMap((run) => run.ticketIds))],
   };
 }
 

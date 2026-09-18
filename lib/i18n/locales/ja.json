@@ -1653,5 +1653,7 @@
   "dispatch.login.kept": "Cookie を {count} 件保存しました。capture_page はこのホストをログイン状態で撮ります。",
   "dispatch.login.keptNone": "何も保存されませんでした。ログインウィンドウが既に閉じています。もう一度開き、閉じる前にここを押してください。",
   "handoff.read": "表示",
-  "handoff.edit": "編集"
+  "handoff.edit": "編集",
+  "dispatch.batch.label": "今回の実行（{done}/{total} 発注済み）",
+  "dispatch.batch.hint": "今回のチケット。既定は計画順、フェーズ単位に書き換え可。"
 }

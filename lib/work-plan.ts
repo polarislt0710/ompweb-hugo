@@ -13,7 +13,7 @@
 //
 //   Free-form steps and acceptance criteria.
 
-export const PLAN_AGENTS = ["worker-fast", "worker", "writer", "visual-checker", "scout", "researcher", "reviewer"] as const;
+export const PLAN_AGENTS = ["worker-fast", "worker", "frontend", "writer", "visual-checker", "scout", "researcher", "reviewer"] as const;
 export type PlanAgent = (typeof PLAN_AGENTS)[number];
 
 export const PLAN_FORMAT_GUIDE = `Plan format (.omp/handoff/plan.md):
@@ -26,7 +26,7 @@ Short background every worker needs: stack, constraints, what not to touch.
 ## Tickets
 
 ### T1: <short title>
-- agent: worker-fast | worker | writer | visual-checker | scout | researcher | reviewer
+- agent: worker-fast | worker | frontend | writer | visual-checker | scout | researcher | reviewer
 - depends: none | T<n>, T<m>
 - files: path/one.ts, path/two.ts
 - verify: <one shell command that passes once THIS ticket is done, e.g. npm test -- lib/x.test.mjs>
@@ -36,10 +36,15 @@ worker does not need to re-investigate: name functions, expected behaviour and
 edge cases.
 
 Agent guide: worker-fast = fully specified mechanical edit; worker = one scoped
-coding ticket; writer = copy/docs; visual-checker = screenshots/UI check
-(read-only); scout = read/search the codebase only; researcher = look something
-up on the web and report it with its sources (Perplexity, no token cost);
+coding ticket (backend, queues, DB, services); frontend = one scoped front-end
+ticket — React/Next components, TypeScript wiring, CSS and design tokens,
+responsive and accessibility work — on a model that also reads screenshots and
+mockups, so give it the capture or the design file when the ticket is visual;
+writer = copy/docs; visual-checker = screenshots/UI check (read-only);
+scout = read/search the codebase only; researcher = look something up on the web
+and report it with its sources (Perplexity, no token cost);
 reviewer = review a diff (read-only).
+Anything under a frontend/ or components/ path belongs to frontend, not worker.
 A ticket that depends on a fact nobody here knows — a syllabus rule, a current
 API, a price — belongs to researcher, with its output file named, and the
 tickets that need the answer depending on it. Do not make a coding worker guess.
@@ -47,6 +52,28 @@ Keep tickets small (one worker, under ~30 minutes). Ticket ids must be unique.
 A verify command must be able to pass on its own. If a shared suite only goes
 green after several tickets, give the earlier tickets a narrower check and put
 the full suite on the last ticket (or on a final review ticket).`;
+
+/**
+ * How many tickets one foreman run should carry. A reviewed plan can run to a
+ * hundred tickets; handing them all to one session buries it in context, blows
+ * the task budget long before the end, and leaves nothing to inspect halfway.
+ */
+export const DEFAULT_DISPATCH_BATCH = 12;
+
+/**
+ * The next tickets to dispatch: plan order, skipping anything a previous run
+ * already took. Plan order is dependency order — the reviewer writes it that
+ * way — so a batch's prerequisites are in the batches before it.
+ */
+export function suggestDispatchBatch(
+  plan: ParsedPlan,
+  alreadyDispatched: Iterable<string> = [],
+  limit = DEFAULT_DISPATCH_BATCH,
+): string[] {
+  const taken = new Set([...alreadyDispatched].map((id) => id.toUpperCase()));
+  const remaining = plan.tickets.filter((ticket) => !taken.has(ticket.id.toUpperCase()));
+  return remaining.slice(0, Math.max(1, limit)).map((ticket) => ticket.id);
+}
 
 export interface PlanTicket {
   id: string;

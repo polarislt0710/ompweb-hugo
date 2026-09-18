@@ -29,6 +29,10 @@ interface DispatchState {
   planModifiedAt: number | null;
   runs: DispatchRunView[];
   requests: DispatchRequestView[];
+  /** Tickets earlier runs already took, so a big plan advances instead of restarting. */
+  dispatchedIds: string[];
+  /** The next batch to run, in plan order. */
+  suggested: string[];
 }
 
 interface ConnectorState {
@@ -77,6 +81,9 @@ export function DispatchSection({ cwd, active, planVersion, planDirty, onOpenRun
   const [loginUrl, setLoginUrl] = useState("");
   /** What the last "I'm logged in" actually kept, so a failed login is visible. */
   const [loginKept, setLoginKept] = useState<number | null>(null);
+  /** The batch about to run. Editable, because the owner knows the plan's phases. */
+  const [batch, setBatch] = useState("");
+  const [batchTouched, setBatchTouched] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -128,6 +135,10 @@ export function DispatchSection({ cwd, active, planVersion, planDirty, onOpenRun
   }, [active, showConnector, loadLogins]);
 
   const plan = state?.plan;
+  const suggested = state?.suggested ?? [];
+  useEffect(() => {
+    if (!batchTouched) setBatch(suggested.join(", "));
+  }, [batchTouched, suggested.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
   const pending = state?.requests.find((request) => request.status === "pending") ?? null;
   const latestRun = state?.runs[0] ?? null;
   const liveRun = latestRun && latestRun.state === "running" ? latestRun : null;
@@ -151,6 +162,7 @@ export function DispatchSection({ cwd, active, planVersion, planDirty, onOpenRun
       if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : `HTTP ${response.status}`);
       setError(null);
       const sessionId = (body.run as DispatchRunView | undefined)?.sessionId;
+      setBatchTouched(false);
       await load();
       if (sessionId) onOpenRun(sessionId);
     } catch (e) {
@@ -304,6 +316,29 @@ export function DispatchSection({ cwd, active, planVersion, planDirty, onOpenRun
           </div>
         )}
 
+        {step === "dispatch" && !pending && plan && plan.tickets.length > 0 && (
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <span style={{ ...dim, whiteSpace: "nowrap" }}>
+              {t("dispatch.batch.label", {
+                done: state?.dispatchedIds.length ?? 0,
+                total: plan.tickets.length,
+              })}
+            </span>
+            <input
+              type="text"
+              value={batch}
+              onChange={(event) => { setBatch(event.target.value); setBatchTouched(true); }}
+              placeholder={suggested.join(", ")}
+              title={t("dispatch.batch.hint")}
+              style={{
+                flex: 1, minWidth: 0, padding: "4px 7px", fontSize: 11,
+                fontFamily: "var(--font-mono)", border: "1px solid var(--border)",
+                borderRadius: "var(--radius-control)", background: "var(--bg)", color: "var(--text)",
+              }}
+            />
+          </div>
+        )}
+
         {plan?.errors.map((message) => <div key={message} style={{ color: "var(--status-error, #dc2626)", fontSize: 11 }}>{message}</div>)}
 
         {step === "review" && latestRun && (
@@ -322,9 +357,10 @@ export function DispatchSection({ cwd, active, planVersion, planDirty, onOpenRun
               disabled={Boolean(busy) || (!pending && !planReady)}
               title={dispatchDisabledReason ?? undefined}
               onClick={() => {
+                const ticketIds = batch.split(/[\s,]+/).map((id) => id.trim().toUpperCase()).filter(Boolean);
                 void (pending
                   ? runDispatch({ action: "decide", requestId: pending.id, approve: true }, "approve")
-                  : runDispatch({ action: "start", cwd }, "start"));
+                  : runDispatch({ action: "start", cwd, ticketIds }, "start"));
               }}
               style={{ ...button(!busy && (Boolean(pending) || planReady), true), flex: 1 }}
             >

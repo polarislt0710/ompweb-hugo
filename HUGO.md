@@ -168,6 +168,12 @@ Settings → Apps → Developer mode → new app → paste the URL → auth **OA
 - Only git repositories share source, and only files `git ls-files` would show
   (ignored files stay hidden), minus a secret-name denylist. Non-git projects
   share the handoff notes only.
+- One dispatch carries a batch, not the whole plan: a reviewed plan can run to a
+  hundred tickets, and handing them all to one foreman buries it in context and
+  spends the task budget long before the end. The card proposes the next twelve
+  in plan order, skipping tickets earlier runs already took, and the field is
+  editable so a phase can be run on its own. `OMP_WEB_DISPATCH_BATCH` changes the
+  size.
 - Dispatches and foreman messages wait for approval in the Handoff tab. Set
   `OMP_WEB_MCP_DIRECT_DISPATCH=1` to let ChatGPT start runs itself.
 - Other env: `OMP_WEB_MCP=off` disables the connector,
