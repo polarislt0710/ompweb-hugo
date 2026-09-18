@@ -19,7 +19,7 @@ import { readFileSync, statSync } from "fs";
 import { isIP } from "net";
 import { resolveChromeBinary } from "../chrome-path";
 import { captureAll, type CaptureRequest, type CaptureResult, type Viewport } from "./capture";
-import { captureProfileForHost, cloneProfileForCapture, readSavedCookies, touchCaptureProfile } from "./capture-profiles";
+import { captureProfileForHost, cloneProfileForCapture, readSavedSession, touchCaptureProfile } from "./capture-profiles";
 import { ProjectAccessError, resolveReadablePath, type ConnectorProject } from "./project-files";
 
 /** ChatGPT has to carry the image in the conversation, so keep it small. */
@@ -213,6 +213,7 @@ async function captureBySession(
   chrome: string,
   planned: ReadonlyArray<{ request: CaptureRequest; profileSlug: string | null }>,
   options: { fullPage: boolean; waitMs: number },
+  notes: string[],
 ): Promise<Array<{ result: CaptureResult; signedIn: boolean }>> {
   const groups = new Map<string, number[]>();
   planned.forEach((shot, index) => {
@@ -226,23 +227,27 @@ async function captureBySession(
   for (const [slug, indexes] of groups) {
     const requests = indexes.map((index) => planned[index].request);
     let profile: { dir: string; dispose: () => void } | null = null;
-    let cookies: ReturnType<typeof readSavedCookies> = [];
+    let session: ReturnType<typeof readSavedSession> = null;
     try {
       if (slug) {
         profile = cloneProfileForCapture(slug);
-        cookies = readSavedCookies(slug);
+        session = readSavedSession(slug);
         touchCaptureProfile(slug);
       }
-    } catch {
-      // The saved session is unusable (deleted by hand, disk full). Shoot the
-      // pages logged out rather than losing the whole comparison.
+    } catch (error) {
+      // The saved session is unusable (deleted by hand, a browser still writing
+      // the profile). Shoot the pages logged out rather than losing the whole
+      // comparison — but say so, because a silently logged-out screenshot is
+      // the one failure that looks like a real answer.
       profile = null;
+      session = null;
+      notes.push(`the saved session for ${slug} could not be used, so these pages were captured logged out: ${error instanceof Error ? error.message : String(error)}`);
     }
     const shots = await captureAll(chrome, requests, {
       fullPage: options.fullPage,
       waitMs: options.waitMs,
       ...(profile ? { profileDir: profile.dir } : {}),
-      ...(cookies.length > 0 ? { cookies } : {}),
+      ...(session ? { session } : {}),
     }).finally(() => profile?.dispose());
     shots.forEach((result, position) => {
       collected[indexes[position]] = { result, signedIn: Boolean(profile) };
@@ -295,7 +300,7 @@ export async function capturePages(
     throw new ProjectAccessError("denied", notes.join("; ") || "Nothing could be captured");
   }
 
-  const results = await captureBySession(chrome, planned, { fullPage, waitMs });
+  const results = await captureBySession(chrome, planned, { fullPage, waitMs }, notes);
 
   const images: CapturedImage[] = [];
   let total = 0;

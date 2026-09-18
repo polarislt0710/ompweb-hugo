@@ -132,9 +132,12 @@ Settings → Apps → Developer mode → new app → paste the URL → auth **OA
   **Open browser**, log in by hand in the Chrome window that appears on this
   Mac, press **I'm logged in**. The window is a real browser — no password is
   typed into OMP Web or stored by it. Pressing the button reads the session out
-  of the live window over DevTools before closing it, because Chrome only writes
-  cookies that carry an expiry to disk and plenty of sites sign you in with one
-  that does not; those cookies are replayed into each capture. If the window was
+  of the live window over DevTools before closing it: its cookies, and the
+  localStorage/sessionStorage of every page open on that host. Neither survives
+  on its own — Chrome only writes cookies that carry an expiry, and orcagrade
+  keeps its token in localStorage and sets no cookie at all. Cookies are set
+  directly in the capture browser; storage is installed by a script that runs
+  before the page's own scripts, which is when an app reads its token. If the window was
   already closed there is nothing to read, and the login is refused rather than
   marked done — otherwise the reviewer gets logged-out screenshots labelled
   "signed in". The session lives in

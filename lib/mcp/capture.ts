@@ -25,6 +25,20 @@ export interface CaptureRequest {
   viewport: Viewport;
 }
 
+/**
+ * What being signed in actually consists of. Cookies are only half of it: plenty
+ * of apps keep the token in localStorage instead, and a capture that replays
+ * only cookies comes back at the login screen.
+ */
+export interface CaptureSession {
+  cookies: CaptureCookie[];
+  origins: Array<{
+    origin: string;
+    local: Array<[string, string]>;
+    session: Array<[string, string]>;
+  }>;
+}
+
 /** A cookie as DevTools hands it over, and as it is handed back. */
 export interface CaptureCookie {
   name: string;
@@ -163,13 +177,37 @@ async function pageWebSocketUrl(userDataDir: string, child: ChildProcess): Promi
 }
 
 /**
+ * Put the owner's signed-in state back into a fresh browser.
+ *
+ * Cookies go in directly. Storage cannot: there is nothing to write to until a
+ * document on that origin exists, so the entries are installed by a script that
+ * runs before the page's own scripts on every load — which is exactly when an
+ * app reads its token.
+ */
+async function restoreSession(page: DevTools, session: CaptureSession): Promise<void> {
+  if (session.cookies.length > 0) {
+    await page.send("Network.enable").catch(() => undefined);
+    await page.send("Network.setCookies", { cookies: session.cookies }).catch(() => undefined);
+  }
+  for (const entry of session.origins) {
+    if (entry.local.length === 0 && entry.session.length === 0) continue;
+    const source = `(() => { try {
+      if (location.origin !== ${JSON.stringify(entry.origin)}) return;
+      for (const [key, value] of ${JSON.stringify(entry.local)}) localStorage.setItem(key, value);
+      for (const [key, value] of ${JSON.stringify(entry.session)}) sessionStorage.setItem(key, value);
+    } catch {} })();`;
+    await page.send("Page.addScriptToEvaluateOnNewDocument", { source }).catch(() => undefined);
+  }
+}
+
+/**
  * Shoot every request with one browser. Failures are per-request: one page that
  * will not load must not lose the other screens in the same comparison.
  */
 export async function captureAll(
   chromeBinary: string,
   requests: readonly CaptureRequest[],
-  options: { fullPage: boolean; waitMs: number; profileDir?: string; cookies?: readonly CaptureCookie[] },
+  options: { fullPage: boolean; waitMs: number; profileDir?: string; session?: CaptureSession },
 ): Promise<CaptureResult[]> {
   // A profile directory carries a signed-in session and belongs to the caller,
   // which disposes of it; without one the browser starts clean and throwaway.
@@ -195,12 +233,7 @@ export async function captureAll(
   try {
     page = await DevTools.connect(await pageWebSocketUrl(userDataDir, child));
     await page.send("Page.enable");
-    if (options.cookies?.length) {
-      // Session cookies never reach the profile on disk, so the ones captured
-      // when the owner finished logging in are replayed into this browser.
-      await page.send("Network.enable");
-      await page.send("Network.setCookies", { cookies: options.cookies }).catch(() => undefined);
-    }
+    if (options.session) await restoreSession(page, options.session);
 
     for (const request of requests) {
       try {

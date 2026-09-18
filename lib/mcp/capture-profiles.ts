@@ -23,7 +23,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { getAgentDir } from "../omp/paths";
 import { resolveChromeBinary } from "../chrome-path";
-import { browserWebSocketUrl, DevTools, type CaptureCookie } from "./capture";
+import { browserWebSocketUrl, DevTools, type CaptureSession } from "./capture";
 
 export interface CaptureProfile {
   /** Filesystem-safe id, derived from the host. */
@@ -197,27 +197,77 @@ export function startCaptureLogin(rawUrl: unknown): CaptureProfile {
   return profile;
 }
 
-function cookiesPath(slug: string): string {
-  return join(profilesDir(), `${slug}.cookies.json`);
+function sessionPath(slug: string): string {
+  return join(profilesDir(), `${slug}.session.json`);
 }
 
 /**
  * Read the session out of the open login window before closing it.
  *
- * Chrome only writes cookies that carry an expiry to disk, and plenty of sites
- * sign you in with a session cookie, which would be gone the moment the window
- * closed. Asking the live browser for its cookies is the only way to keep those.
+ * Nothing on disk is enough. Chrome only writes cookies that carry an expiry,
+ * and an app that keeps its token in localStorage leaves no cookie at all — the
+ * first site tried here is exactly that kind. So the live browser is asked for
+ * both: its cookies, and the storage of every page open on this host.
  */
-async function exportCookies(slug: string, dir: string): Promise<number> {
+async function exportSession(slug: string, dir: string, host: string): Promise<CaptureSession> {
   let browser: DevTools | undefined;
+  const session: CaptureSession = { cookies: [], origins: [] };
   try {
+    const { port } = parsePortFile(dir);
     browser = await DevTools.connect(await browserWebSocketUrl(dir, 4000));
-    const result = await browser.send("Storage.getCookies") as { cookies?: unknown[] };
-    const cookies = Array.isArray(result.cookies) ? result.cookies : [];
-    writeFileSync(cookiesPath(slug), JSON.stringify(cookies), { mode: 0o600 });
-    return cookies.length;
+    const result = await browser.send("Storage.getCookies") as { cookies?: CaptureSession["cookies"] };
+    session.cookies = Array.isArray(result.cookies) ? result.cookies : [];
+
+    // Storage belongs to a document, so it has to be read from the pages the
+    // owner actually logged in on, not from the browser target.
+    const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json() as Array<{ type: string; url: string; webSocketDebuggerUrl?: string }>;
+    const pages = targets.filter((target) => target.type === "page" && target.webSocketDebuggerUrl && hostOf(target.url) === host);
+    for (const target of pages) {
+      let page: DevTools | undefined;
+      try {
+        page = await DevTools.connect(target.webSocketDebuggerUrl as string);
+        const evaluated = await page.send("Runtime.evaluate", {
+          expression: "JSON.stringify({ origin: location.origin, local: Object.entries(localStorage), session: Object.entries(sessionStorage) })",
+          returnByValue: true,
+        }) as { result?: { value?: string } };
+        const parsed = JSON.parse(evaluated.result?.value ?? "null") as CaptureSession["origins"][number] | null;
+        if (parsed?.origin && !session.origins.some((entry) => entry.origin === parsed.origin)) session.origins.push(parsed);
+      } catch {
+        // A page that will not answer (still loading, or an error page) is skipped.
+      } finally {
+        page?.close();
+      }
+    }
+    writeFileSync(sessionPath(slug), JSON.stringify(session), { mode: 0o600 });
+    return session;
   } finally {
     browser?.close();
+  }
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function parsePortFile(dir: string): { port: string } {
+  const [first] = readFileSync(join(dir, "DevToolsActivePort"), "utf8").split("\n");
+  return { port: first.trim() };
+}
+
+/** Block until no browser is left holding this profile, or the wait runs out. */
+async function waitForExit(dir: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (loginProcessIds(dir).length === 0) {
+      // The helper processes go a moment after the main one.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
   }
 }
 
@@ -235,17 +285,17 @@ function loginProcessIds(dir: string): number[] {
 }
 
 /** The owner says the login is done: keep the session, then close the window. */
-export async function finishCaptureLogin(slug: unknown): Promise<CaptureProfile & { cookieCount: number }> {
+export async function finishCaptureLogin(slug: unknown): Promise<CaptureProfile & { cookieCount: number; storageKeys: number }> {
   const id = typeof slug === "string" ? slug : "";
   const store = readStore();
   const profile = store.profiles.find((entry) => entry.slug === id);
   if (!profile) throw new CaptureProfileError("No such capture login.");
   const dir = captureProfileDir(id);
 
-  let cookieCount = 0;
+  let kept: CaptureSession = { cookies: [], origins: [] };
   let exportFailed = "";
   try {
-    cookieCount = await exportCookies(id, dir);
+    kept = await exportSession(id, dir, profile.host);
   } catch (error) {
     // An older window (or one the owner already closed) has nothing to read;
     // fall back to whatever Chrome wrote to the profile on its way out.
@@ -256,7 +306,7 @@ export async function finishCaptureLogin(slug: unknown): Promise<CaptureProfile 
   if (child && child.exitCode === null) child.kill("SIGTERM");
   openLogins.delete(id);
   // The server may have restarted since the window opened, losing the handle.
-  // Chrome flushes its cookie database on quit, so it must be asked, not killed.
+  // Chrome flushes its databases on quit, so it must be asked, not killed.
   for (const pid of loginProcessIds(dir)) {
     try {
       process.kill(pid, "SIGTERM");
@@ -264,6 +314,10 @@ export async function finishCaptureLogin(slug: unknown): Promise<CaptureProfile 
       // already gone
     }
   }
+  // And it must be given time to finish. A capture that copies the profile while
+  // the browser is still writing it hits files that vanish mid-copy, and the
+  // screenshot silently comes back logged out.
+  await waitForExit(dir, 8000);
 
   if (exportFailed) {
     // Without the session read out of the live window there is nothing to
@@ -276,16 +330,22 @@ export async function finishCaptureLogin(slug: unknown): Promise<CaptureProfile 
   }
   profile.loggedInAt = Date.now();
   writeStore(store);
-  return { ...profile, cookieCount };
+  const storageKeys = kept.origins.reduce((total, entry) => total + entry.local.length + entry.session.length, 0);
+  if (kept.cookies.length === 0 && storageKeys === 0) {
+    throw new CaptureProfileError("The window held no session for this site — it looks like the login did not complete. Try again, and press this while the signed-in page is open.");
+  }
+  return { ...profile, cookieCount: kept.cookies.length, storageKeys };
 }
 
-/** The cookies kept when the owner finished logging in, for one capture. */
-export function readSavedCookies(slug: string): CaptureCookie[] {
+/** The signed-in state kept when the owner finished logging in, for one capture. */
+export function readSavedSession(slug: string): CaptureSession | null {
   try {
-    const parsed = JSON.parse(readFileSync(cookiesPath(slug), "utf8")) as CaptureCookie[];
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed = JSON.parse(readFileSync(sessionPath(slug), "utf8")) as Partial<CaptureSession>;
+    const cookies = Array.isArray(parsed.cookies) ? parsed.cookies : [];
+    const origins = Array.isArray(parsed.origins) ? parsed.origins : [];
+    return cookies.length === 0 && origins.length === 0 ? null : { cookies, origins };
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -298,7 +358,7 @@ export function deleteCaptureProfile(slug: unknown): void {
   store.profiles = store.profiles.filter((profile) => profile.slug !== id);
   writeStore(store);
   rmSync(captureProfileDir(id), { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
-  rmSync(cookiesPath(id), { force: true });
+  rmSync(sessionPath(id), { force: true });
 }
 
 // ---------------------------------------------------------------------------
