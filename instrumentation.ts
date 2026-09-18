@@ -18,6 +18,15 @@ export async function register(): Promise<void> {
     // Diagnostics are best-effort.
   }
 
+  // An overnight dispatch chain outlives a server restart: the loop's state is a
+  // file, and this re-arms its timer so a restart does not silently end the run.
+  try {
+    const { resumeAutoDispatch } = await import("@/lib/dispatch-auto");
+    resumeAutoDispatch();
+  } catch {
+    // Never block boot for this.
+  }
+
   // Warm the shared utility omp process so the first models/auth request does
   // not pay the multi-second cold spawn (measured 1.2-4s on a real install).
   // Fire-and-forget: register() must not block boot, and a missing omp binary

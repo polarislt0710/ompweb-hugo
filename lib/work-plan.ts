@@ -61,18 +61,37 @@ the full suite on the last ticket (or on a final review ticket).`;
 export const DEFAULT_DISPATCH_BATCH = 12;
 
 /**
- * The next tickets to dispatch: plan order, skipping anything a previous run
- * already took. Plan order is dependency order — the reviewer writes it that
- * way — so a batch's prerequisites are in the batches before it.
+ * The next tickets to dispatch: plan order, but only ones whose prerequisites
+ * are already satisfied — by an earlier run, or by a ticket earlier in this same
+ * batch, which the foreman runs in dependency order.
+ *
+ * Plan order alone is not enough. A reviewer can add a gate late: the repair
+ * chain T145-T160 was appended after T113-T123, then T113-T123 were made to
+ * depend on it, so the file's order and the dependency order disagree. Picking
+ * by position would have dispatched work whose gate had not run.
+ *
+ * `satisfied` is what counts as done. A ticket that was dispatched but came back
+ * blocked does not belong in it, or everything behind it would be released.
  */
 export function suggestDispatchBatch(
   plan: ParsedPlan,
-  alreadyDispatched: Iterable<string> = [],
+  satisfied: Iterable<string> = [],
   limit = DEFAULT_DISPATCH_BATCH,
+  options: { exclude?: Iterable<string> } = {},
 ): string[] {
-  const taken = new Set([...alreadyDispatched].map((id) => id.toUpperCase()));
-  const remaining = plan.tickets.filter((ticket) => !taken.has(ticket.id.toUpperCase()));
-  return remaining.slice(0, Math.max(1, limit)).map((ticket) => ticket.id);
+  const done = new Set([...satisfied].map((id) => id.toUpperCase()));
+  const skip = new Set([...(options.exclude ?? [])].map((id) => id.toUpperCase()));
+  const chosen: string[] = [];
+  const ready = new Set(done);
+  for (const ticket of plan.tickets) {
+    if (chosen.length >= Math.max(1, limit)) break;
+    const id = ticket.id.toUpperCase();
+    if (done.has(id) || skip.has(id)) continue;
+    if (!ticket.depends.every((dep) => ready.has(dep.toUpperCase()))) continue;
+    chosen.push(ticket.id);
+    ready.add(id);
+  }
+  return chosen;
 }
 
 export interface PlanTicket {

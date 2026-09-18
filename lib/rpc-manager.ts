@@ -58,6 +58,10 @@ const SKIPPABLE_HOST_TOOLS = new Set(["open_file", "open_url", "notify"]);
  * stay pending forever. Generous enough to cover slow local startup work the
  * child does before acking. */
 const PROMPT_ACK_TIMEOUT_MS = 30_000;
+/** Frames within this window mean the child is still talking — a late RPC ack
+ * is not a dead process. Destroying it would kill a live browser-control run. */
+const LIVE_FRAME_MS = 15_000;
+const SESSION_UNRESPONSIVE_MESSAGE = "The OMP session stopped responding and was reset.";
 const NON_TERMINAL_CONTINUATION_GRACE_MS = 2_000;
 const AWAITING_AGENT_START_TIMEOUT_MS = 10_000;
 const RESTARTING_MESSAGE = "This session is restarting — retry in a moment.";
@@ -245,6 +249,8 @@ export class AgentSessionWrapper {
   private bashRunning = false;
   private streaming = false;
   private compacting = false;
+  /** Last event frame from the child. A late RPC ack is not a dead process. */
+  private lastFrameAt = 0;
   private fastModeEnabled = false;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private onDestroyCallback: (() => void) | null = null;
@@ -372,6 +378,7 @@ export class AgentSessionWrapper {
   }
 
   private handleFrame(frame: RpcFrame): void {
+    this.lastFrameAt = Date.now();
     this.resetIdleTimer();
     const event = frame as AgentEvent;
     let refreshSessionList = false;
@@ -837,6 +844,22 @@ export class AgentSessionWrapper {
     }
   }
 
+  private childIsLive(): boolean {
+    return this.streaming || this.compacting || this.bashRunning
+      || (this.lastFrameAt > 0 && Date.now() - this.lastFrameAt < LIVE_FRAME_MS);
+  }
+
+  /** Recycle a silent wedged child. A child still emitting frames (or mid-run)
+   * must not be killed — the ack was late, not missing. */
+  private async failTimedOutCommand(error: unknown): Promise<never> {
+    if (!(error instanceof RpcCommandTimeoutError)) throw error;
+    if (this.childIsLive()) {
+      throw new WebRpcError("Wait for the current run to finish", "session_busy");
+    }
+    await this.destroyAndWait();
+    throw new WebRpcError(SESSION_UNRESPONSIVE_MESSAGE, "session_unresponsive");
+  }
+
   /** Get OMP's own complete MCP inventory and live connection states. */
   async getMcpList(): Promise<string> {
     if (this.restarting) throw new WebRpcError(RESTARTING_MESSAGE, "session_restarting");
@@ -892,17 +915,14 @@ export class AgentSessionWrapper {
         this.mcpListWaiter = null;
         waiter.reject(
           expired
-            ? new WebRpcError("The OMP session stopped responding and was reset.", "session_unresponsive")
+            ? new WebRpcError(SESSION_UNRESPONSIVE_MESSAGE, "session_unresponsive")
             : error instanceof Error
               ? error
               : new Error(String(error)),
         );
       }
       if (expired) {
-        // Nothing on this child will ever resolve the waiter; recycle it like
-        // the prompt-ack timeout path so the next request gets a fresh child.
-        await this.destroyAndWait();
-        throw new WebRpcError("The OMP session stopped responding and was reset.", "session_unresponsive");
+        await this.failTimedOutCommand(error);
       }
       throw error;
     } finally {
@@ -1103,6 +1123,7 @@ export class AgentSessionWrapper {
           this.continuationGraceUntil = 0;
           notifyRunningChange();
         }
+        const promptSentAt = Date.now();
         try {
           // omp acks immediately; agent output streams as events, completion is
           // agent_end (agent runs) or prompt_result (local-only slash commands).
@@ -1127,19 +1148,24 @@ export class AgentSessionWrapper {
             this.awaitingAgentStartDeadline = Date.now() + AWAITING_AGENT_START_TIMEOUT_MS;
           }
         } catch (error) {
+          // Late ack: the child already started the run via events. Treat the
+          // prompt as accepted so the UI keeps the SSE stream instead of
+          // recycling a live browser-control / tool session.
+          if (error instanceof RpcCommandTimeoutError && (this.streaming || this.lastFrameAt >= promptSentAt)) {
+            this.awaitingAgentStart = !this.streaming;
+            if (this.awaitingAgentStart) {
+              this.awaitingAgentStartDeadline = Date.now() + AWAITING_AGENT_START_TIMEOUT_MS;
+            } else {
+              this.awaitingAgentStartDeadline = 0;
+            }
+            notifyRunningChange();
+            return null;
+          }
           this.promptRunning = false;
           this.awaitingAgentStart = false;
           this.awaitingAgentStartDeadline = 0;
           notifyRunningChange();
-          if (error instanceof RpcCommandTimeoutError) {
-            // The child took the frame but never acked it, so nothing will ever
-            // report this run: recycle it exactly like the get_state timeout
-            // path so the next request spawns a fresh child instead of talking
-            // to a wedged one.
-            await this.destroyAndWait();
-            throw new WebRpcError("The OMP session stopped responding and was reset.", "session_unresponsive");
-          }
-          throw error;
+          await this.failTimedOutCommand(error);
         } finally {
           if (!streamingBehavior) {
             this.promptDispatchPendingCount = Math.max(0, this.promptDispatchPendingCount - 1);
@@ -1182,11 +1208,7 @@ export class AgentSessionWrapper {
           const state = await this.proc.sendCommand<RpcSessionState>({ type: "get_state" }, GET_STATE_TIMEOUT_MS);
           return this.buildWebState(state);
         } catch (error) {
-          if (error instanceof RpcCommandTimeoutError) {
-            await this.destroyAndWait();
-            throw new WebRpcError("The OMP session stopped responding and was reset.", "session_unresponsive");
-          }
-          throw error;
+          await this.failTimedOutCommand(error);
         }
       }
 
