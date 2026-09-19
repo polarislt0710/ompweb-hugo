@@ -17,7 +17,7 @@
 import { readFileSync, writeFileSync, renameSync, existsSync, statSync } from "fs";
 import { join } from "path";
 import { getAgentDir } from "./omp/paths";
-import { listDispatchState, startDispatch, loadDispatchStore, type DispatchRun } from "./dispatch";
+import { startDispatch, loadDispatchStore, type DispatchRun } from "./dispatch";
 import { parsePlan, suggestDispatchBatch, DEFAULT_DISPATCH_BATCH, type ParsedPlan } from "./work-plan";
 import { HANDOFF_DIR } from "./handoff-paths";
 
@@ -110,6 +110,24 @@ export type TicketState = "done" | "blocked" | "skipped" | "needs-decision" | "r
  * which counts against the run: a batch that quietly lost a ticket is exactly
  * what happened with T111, and it must not look like success.
  */
+/**
+ * Every ticket status.md has ever reported `done`, across all runs.
+ *
+ * This is the only honest answer to "what is finished". Asking "was it
+ * dispatched" says yes for a ticket that was dispatched and skipped, and for one
+ * whose session was killed — both of which then release the work behind them.
+ */
+export function readCompletedTickets(cwd: string): Set<string> {
+  const path = join(cwd, HANDOFF_DIR, "status.md");
+  const done = new Set<string>();
+  if (!existsSync(path)) return done;
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    const row = /^\|\s*(T\d+)\s*\|\s*done\s*\|/i.exec(line.trim());
+    if (row) done.add(row[1].toUpperCase());
+  }
+  return done;
+}
+
 export function readRunStates(cwd: string): Map<string, TicketState> {
   const path = join(cwd, HANDOFF_DIR, "status.md");
   const states = new Map<string, TicketState>();
@@ -244,7 +262,6 @@ async function tick(): Promise<void> {
 
     // What the last run actually achieved.
     const reported = readRunStates(state.cwd);
-    const { dispatchedIds } = listDispatchState(state.cwd);
     const lastRun = loadDispatchStore().runs.filter((run) => run.cwd === state.cwd).at(-1);
     if (lastRun) {
       const bad = lastRun.ticketIds.filter((id) => {
@@ -276,11 +293,9 @@ async function tick(): Promise<void> {
     const unreachable = dependentsOf(plan, abandoned);
     // Dispatched-and-abandoned is not the same as done: a blocked ticket must
     // not release the work behind it.
-    const waiting = new Set((state.skipped ?? []).map((id) => id.toUpperCase()));
-    const satisfied = dispatchedIds.filter((id) => {
-      const key = id.toUpperCase();
-      return !abandoned.has(key) && !waiting.has(key);
-    });
+    // Finished means status.md said done — not merely that a run took it.
+    const satisfied = [...readCompletedTickets(state.cwd)].filter((id) => !abandoned.has(id));
+
     const allowed = new Set((state.only ?? []).map((id) => id.toUpperCase()));
     const offLimits = allowed.size === 0
       ? []
