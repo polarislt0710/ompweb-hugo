@@ -222,6 +222,13 @@ export function parsePlan(markdown: string): ParsedPlan {
  * concurrently on 2026-09-19 and all three edited the same page, which is the
  * failure this guards against.
  *
+ * NOT SAFE YET for this project: a ticket's `files` list covers what the worker
+ * edits, but every foreman also rewrites `.omp/handoff/status.md`, which no
+ * ticket declares. Three lanes did exactly that on 2026-09-19 at 16:05 and the
+ * last writer won, erasing every earlier run from the file; the tickets' own
+ * receipts survived and were used to rebuild it. Lanes stay capped at one until
+ * each foreman writes its own status file and something merges them.
+ *
  * Tickets that share a path land in the same lane, where they run in order.
  * Lanes are the connected components of "shares a file with", so two lanes can
  * never touch the same path. Components are merged until there are at most

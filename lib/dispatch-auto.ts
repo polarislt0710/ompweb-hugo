@@ -383,6 +383,7 @@ async function tick(): Promise<void> {
       return;
     }
 
+    // One lane until the shared status.md problem is solved; see splitIntoLanes.
     const lanes = splitIntoLanes(plan, next, state.maxLanes ?? 1);
     const runs = [];
     for (const lane of lanes) runs.push(await startDispatch(state.cwd, lane, "web"));
