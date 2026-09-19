@@ -65,6 +65,8 @@ export interface AutoState {
   lastBatch?: string[];
   /** The most finished tickets status.md has ever reported. It must never fall. */
   doneHighWater?: number;
+  /** How many times in a row the same batch has been selected. */
+  repeats?: number;
   stopReason?: AutoStopReason;
   /**
    * The process driving the loop. It used to run inside the web server, where a
@@ -132,7 +134,11 @@ export function readCompletedTickets(cwd: string): Set<string> {
   const done = new Set<string>();
   if (!existsSync(path)) return done;
   for (const line of readFileSync(path, "utf8").split("\n")) {
-    const row = /^\|\s*(T\d+)\s*\|\s*done\s*\|/i.exec(line.trim());
+    // A foreman writes its verdict in the state cell, not only the word:
+    // "done（round-5 verdict FAIL）" is a finished reviewer ticket. Requiring the
+    // cell to hold nothing but "done" made the loop re-dispatch T127 and T160
+    // eight times over ninety minutes, each round reaching the same conclusion.
+    const row = /^\|\s*(T\d+)\s*\|\s*done\b/i.exec(line.trim());
     if (row) done.add(row[1].toUpperCase());
   }
   return done;
@@ -424,6 +430,17 @@ async function tick(): Promise<void> {
             : "Every ticket in the plan has been dispatched.");
       return;
     }
+    // A batch that comes back unchanged twice has nothing more to give: the
+    // third attempt would reach the same conclusion and cost the same money.
+    const sameAsLast = state.lastBatch && state.lastBatch.length === next.length
+      && state.lastBatch.every((id, i) => id.toUpperCase() === next[i].toUpperCase());
+    state.repeats = sameAsLast ? (state.repeats ?? 0) + 1 : 0;
+    if (state.repeats >= 2) {
+      stop(state, "blocked",
+        `${next.join(", ")} came back unchanged ${state.repeats + 1} times. Re-running it would reach the same answer, so the loop stopped instead of paying for a fourth round.`);
+      return;
+    }
+
     if (state.batchesRun >= state.maxBatches) {
       stop(state, "limit", `Stopped after ${state.batchesRun} batches, as configured. Next would have been ${next[0]}–${next.at(-1)}.`);
       return;
