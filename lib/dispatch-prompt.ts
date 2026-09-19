@@ -41,6 +41,6 @@ Rules:
 ### Next
 One or two lines for the reviewer.
 
-Replace the previous run's section only when all of its tickets are included in this run; otherwise add the new section above it.
+Never rewrite this file. Everything already in it is other runs' evidence of what passed, and it is the only record the dispatcher reads to know what is finished. Add your section at the top and leave every byte below it alone — including the title, even when your batch belongs to a different part of the plan. Replace an existing section only when this run covers every ticket in it. A run that opened status.md fresh on 2026-09-19 erased thirty-eight passing tickets, and the dispatcher then re-ran work that was already done.
 7. When every selected ticket is done, blocked, skipped or needs-decision, update status.md one last time and stop. Reply with a three-line summary.`;
 }
