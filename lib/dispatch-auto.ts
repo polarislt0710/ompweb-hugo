@@ -166,7 +166,11 @@ export function readLatestStates(cwd: string): Map<string, TicketState> {
   const states = new Map<string, TicketState>();
   if (!existsSync(path)) return states;
   for (const line of readFileSync(path, "utf8").split("\n")) {
-    const row = /^\|\s*(T\d+)\s*\|\s*([A-Za-z-]+)\s*\|/.exec(line.trim());
+    // The state cell carries the foreman's own words after the verdict —
+    // "needs-decision（誠實停在基建停止點）" — so do not demand the closing pipe
+    // right after the word. Requiring it made every annotated verdict invisible,
+    // and T14/T15/T18/T26 were re-dispatched instead of being left behind.
+    const row = /^\|\s*(T\d+)\s*\|\s*([A-Za-z-]+)/.exec(line.trim());
     if (!row) continue;
     const id = row[1].toUpperCase();
     if (states.has(id)) continue; // sections run newest first
@@ -196,7 +200,11 @@ export function readRunStates(cwd: string): Map<string, TicketState> {
   const section = text.slice(first.index, second ? second.index : undefined);
 
   for (const line of section.split("\n")) {
-    const row = /^\|\s*(T\d+)\s*\|\s*([A-Za-z-]+)\s*\|/.exec(line.trim());
+    // The state cell carries the foreman's own words after the verdict —
+    // "needs-decision（誠實停在基建停止點）" — so do not demand the closing pipe
+    // right after the word. Requiring it made every annotated verdict invisible,
+    // and T14/T15/T18/T26 were re-dispatched instead of being left behind.
+    const row = /^\|\s*(T\d+)\s*\|\s*([A-Za-z-]+)/.exec(line.trim());
     if (!row) continue;
     const word = row[2].toLowerCase();
     const state: TicketState =
