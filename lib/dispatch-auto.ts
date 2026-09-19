@@ -67,6 +67,15 @@ export interface AutoState {
   doneHighWater?: number;
   /** How many times in a row the same batch has been selected. */
   repeats?: number;
+  /**
+   * Tickets to dispatch even though status.md already calls them done.
+   *
+   * A reviewer ticket records a verdict and finishes; when the thing it judged
+   * changes, it has to judge again. Completion is otherwise the loop's guard
+   * against re-running finished work, so this list is explicit and is cleared as
+   * soon as the tickets go out.
+   */
+  force?: string[];
   stopReason?: AutoStopReason;
   /**
    * The process driving the loop. It used to run inside the web server, where a
@@ -400,7 +409,9 @@ async function tick(): Promise<void> {
     // Dispatched-and-abandoned is not the same as done: a blocked ticket must
     // not release the work behind it.
     // Finished means status.md said done — not merely that a run took it.
-    const satisfied = [...readCompletedTickets(state.cwd)].filter((id) => !abandoned.has(id));
+    const forced = new Set((state.force ?? []).map((id) => id.toUpperCase()));
+    const satisfied = [...readCompletedTickets(state.cwd)]
+      .filter((id) => !abandoned.has(id) && !forced.has(id));
 
     // status.md may only ever learn more. Fewer means it was overwritten.
     if (lostHistory(state.doneHighWater, satisfied.length)) {
@@ -448,6 +459,8 @@ async function tick(): Promise<void> {
 
     // One lane until the shared status.md problem is solved; see splitIntoLanes.
     backUpStatus(state.cwd);
+    // A forced ticket is owed exactly one run, not a standing exemption.
+    if (state.force?.length) state.force = state.force.filter((id) => !next.some((n) => n.toUpperCase() === id.toUpperCase()));
     const lanes = splitIntoLanes(plan, next, state.maxLanes ?? 1);
     const runs = [];
     for (const lane of lanes) runs.push(await startDispatch(state.cwd, lane, "web"));
