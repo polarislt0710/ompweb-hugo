@@ -128,6 +128,35 @@ export function readCompletedTickets(cwd: string): Set<string> {
   return done;
 }
 
+/**
+ * The newest state status.md reports for each ticket, across every run section.
+ *
+ * `readRunStates` answers for one run, which is only useful when you know that
+ * run is the newest section — and the loop did not: it compared the last
+ * dispatched run against whatever section happened to be on top, and wrote off
+ * T161/T163 as failures the tick after they both passed.
+ */
+export function readLatestStates(cwd: string): Map<string, TicketState> {
+  const path = join(cwd, HANDOFF_DIR, "status.md");
+  const states = new Map<string, TicketState>();
+  if (!existsSync(path)) return states;
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    const row = /^\|\s*(T\d+)\s*\|\s*([A-Za-z-]+)\s*\|/.exec(line.trim());
+    if (!row) continue;
+    const id = row[1].toUpperCase();
+    if (states.has(id)) continue; // sections run newest first
+    const word = row[2].toLowerCase();
+    states.set(id,
+      word === "done" ? "done"
+      : word === "blocked" ? "blocked"
+      : word === "skipped" ? "skipped"
+      : word.startsWith("needs") ? "needs-decision"
+      : word === "running" ? "running"
+      : "unknown");
+  }
+  return states;
+}
+
 export function readRunStates(cwd: string): Map<string, TicketState> {
   const path = join(cwd, HANDOFF_DIR, "status.md");
   const states = new Map<string, TicketState>();
@@ -261,7 +290,7 @@ async function tick(): Promise<void> {
     }
 
     // What the last run actually achieved.
-    const reported = readRunStates(state.cwd);
+    const reported = readLatestStates(state.cwd);
     const lastRun = loadDispatchStore().runs.filter((run) => run.cwd === state.cwd).at(-1);
     if (lastRun) {
       const bad = lastRun.ticketIds.filter((id) => {
@@ -269,9 +298,12 @@ async function tick(): Promise<void> {
         return reportedState !== "done" && reportedState !== "skipped";
       });
       const skipped = lastRun.ticketIds.filter((id) => reported.get(id) === "skipped");
+      // Only an explicit verdict counts against a ticket. A ticket the table
+      // never mentions is simply not done yet: it goes back in the queue, which
+      // is how T111 was finally caught after a run claimed 12/12 with 11 rows.
       const failed = lastRun.ticketIds.filter((id) => {
         const reportedState = reported.get(id);
-        return reportedState !== "done" && reportedState !== "skipped";
+        return reportedState === "blocked" || reportedState === "needs-decision";
       });
       // Anything that ran and came back done is no longer waiting.
       state.skipped = [...new Set([...(state.skipped ?? []), ...skipped])]
