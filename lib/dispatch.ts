@@ -87,8 +87,16 @@ function saveDispatchStore(store: DispatchStore, path = storePath()): void {
 }
 
 export function readProjectPlan(cwd: string): { markdown: string; plan: ParsedPlan } {
-  const markdown = readHandoffFiles(cwd).find((file) => file.name === "plan.md")?.content ?? "";
-  return { markdown, plan: parsePlan(markdown) };
+  const file = readHandoffFiles(cwd).find((entry) => entry.name === "plan.md");
+  const markdown = file?.content ?? "";
+  const plan = parsePlan(markdown);
+  if (file?.truncated) {
+    // A half-read plan parses fine and simply lacks its tail, which surfaces as
+    // "depends on unknown ticket" for work that is really there. Say what
+    // happened instead.
+    plan.errors.unshift("plan.md is larger than the handoff read limit, so only its start was read. Tickets in the tail are missing from this parse.");
+  }
+  return { markdown, plan };
 }
 
 /** Checks the plan and the ticket selection; returns the tickets that will run. */

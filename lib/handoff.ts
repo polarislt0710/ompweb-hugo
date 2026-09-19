@@ -8,8 +8,16 @@ import { HANDOFF_DIR, HANDOFF_FILES, type HandoffFileName } from "./handoff-path
 
 export { HANDOFF_DIR, HANDOFF_FILES, type HandoffFileName } from "./handoff-paths";
 
-/** Handoff notes are meant to be short; refuse anything that is clearly not. */
-export const MAX_HANDOFF_FILE_BYTES = 256 * 1024;
+/**
+ * Handoff notes are meant to be short; refuse anything that is clearly not.
+ *
+ * plan.md is the exception: a reviewed plan for a large repository runs to
+ * hundreds of tickets. At 256 KiB a 424 KiB plan lost its last forty per cent on
+ * read, and the dispatcher then reported the tickets in that tail as unknown
+ * rather than as unread — so the cap is generous, and going over it is now said
+ * out loud instead of being trimmed away.
+ */
+export const MAX_HANDOFF_FILE_BYTES = 4 * 1024 * 1024;
 
 export interface HandoffFile {
   name: HandoffFileName;
@@ -18,6 +26,21 @@ export interface HandoffFile {
   exists: boolean;
   content: string;
   modifiedAt: number | null;
+  /** The file was longer than the cap and `content` holds only its start. */
+  truncated?: boolean;
+}
+
+/**
+ * Decode the first `limit` bytes, stepping back off a split character.
+ *
+ * Cutting mid-sequence would decode to U+FFFD, which is three bytes — so a naive
+ * cut can return text that is larger than the budget it was cut to.
+ */
+function cutToBytes(buffer: Buffer, limit: number): string {
+  let end = Math.min(limit, buffer.length);
+  // 0b10xxxxxx is a continuation byte: keep walking back to the sequence start.
+  while (end > 0 && (buffer[end] & 0b1100_0000) === 0b1000_0000) end -= 1;
+  return buffer.subarray(0, end).toString("utf8");
 }
 
 export function isHandoffFileName(value: unknown): value is HandoffFileName {
@@ -35,10 +58,14 @@ export function readHandoffFiles(cwd: string): HandoffFile[] {
     try {
       const stat = statSync(filePath);
       if (!stat.isFile()) return { name, relativePath, exists: false, content: "", modifiedAt: null };
-      const content = stat.size > MAX_HANDOFF_FILE_BYTES
-        ? readFileSync(filePath, "utf8").slice(0, MAX_HANDOFF_FILE_BYTES)
+      const truncated = stat.size > MAX_HANDOFF_FILE_BYTES;
+      // Cut by bytes, not by string index: the old `.slice()` counted UTF-16
+      // units against a byte budget, so a file of Chinese prose was cut at a
+      // different place than the check said.
+      const content = truncated
+        ? cutToBytes(readFileSync(filePath), MAX_HANDOFF_FILE_BYTES)
         : readFileSync(filePath, "utf8");
-      return { name, relativePath, exists: true, content, modifiedAt: stat.mtimeMs };
+      return { name, relativePath, exists: true, content, modifiedAt: stat.mtimeMs, truncated };
     } catch {
       return { name, relativePath, exists: false, content: "", modifiedAt: null };
     }
