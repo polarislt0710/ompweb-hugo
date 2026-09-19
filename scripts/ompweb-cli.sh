@@ -282,6 +282,14 @@ cmd_auto() {
       tail -3 "$AUTO_LOG"
       ;;
     stop)
+      # Stopping the loop takes its foremen with it: killing the loop at 15:39
+      # while T164 was twelve minutes in threw that work away. Say so first.
+      if [ "${2:-}" != "-f" ] && [ -n "$("$ROOT/scripts/auto-status.sh" --workers-only 2>/dev/null)" ]; then
+        echo "工人仲做緊嘢，熄咗會連佢哋一齊殺埋："
+        "$ROOT/scripts/auto-status.sh" --workers-only
+        echo "真係要熄就用: ompweb auto stop -f"
+        return 1
+      fi
       if [ -f "$AUTO_PID" ] && kill -0 "$(cat "$AUTO_PID")" 2>/dev/null; then
         kill "$(cat "$AUTO_PID")" && echo "stopped (pid $(cat "$AUTO_PID"))"
       else

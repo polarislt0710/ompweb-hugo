@@ -49,6 +49,19 @@ show() {
   [ -f "$AUTO_LOG" ] && tail -4 "$AUTO_LOG" | sed 's/^/            /'
 }
 
+# --workers-only prints one line per live worker and nothing else, so callers can
+# test whether it is safe to stop the loop.
+if [ "${1:-}" = "--workers-only" ]; then
+  cwd=$(sed -n 's/.*"cwd": *"\([^"]*\)".*/\1/p' "$STATE" 2>/dev/null | head -1)
+  for f in "$HOME/.omp/agent/sessions/"*"$(basename "$cwd")"*/*/T*.jsonl; do
+    [ -f "$f" ] || continue
+    [ -f "$f.tombstone" ] && continue
+    [ "$(age_s "$f")" -gt "$FRESH_S" ] && continue
+    printf '  %s  寫嘢 %ss 前\n' "$(basename "$f" .jsonl)" "$(age_s "$f")"
+  done
+  exit 0
+fi
+
 if [ "${1:-}" = "-w" ] || [ "${1:-}" = "--watch" ]; then
   while true; do clear; date '+%H:%M:%S'; echo; show; sleep 10; done
 else
