@@ -14,7 +14,7 @@
 // person. This loop never reruns a ticket, never edits the plan, and never
 // decides that a blocker does not matter.
 
-import { readFileSync, writeFileSync, renameSync, existsSync, statSync } from "fs";
+import { readFileSync, writeFileSync, renameSync, existsSync, statSync, readdirSync } from "fs";
 import { join } from "path";
 import { getAgentDir } from "./omp/paths";
 import { startDispatch, loadDispatchStore, type DispatchRun } from "./dispatch";
@@ -233,15 +233,41 @@ const SILENCE_MS = 5 * 60_000;
  * "missing from status.md" at 12:48, a minute later, before the foreman had
  * written a word. The session's own file is the evidence both processes can see:
  * an omp session appends to it as it works.
+ *
+ * But the foreman's own file is not enough. A foreman that has handed its ticket
+ * to a worker falls silent for as long as the worker runs, while the worker
+ * appends to `<session dir>/<ticket>.jsonl` beside it. Reading only the foreman
+ * is how T111 was dispatched three times in twelve minutes, each copy editing
+ * the same page as the last. So take the newest write anywhere in the session:
+ * the foreman's file, or any worker's.
  */
 export function runLooksFinished(run: Pick<DispatchRun, "startedAt" | "sessionFile">, now = Date.now()): boolean {
   if (now - run.startedAt < START_GRACE_MS) return false;
   if (!run.sessionFile) return true;
+  const lastWrite = newestWriteInSession(run.sessionFile);
+  if (lastWrite === null) return true; // nothing was ever written; nothing to wait for
+  return now - lastWrite > SILENCE_MS;
+}
+
+/** The newest mtime of a session's own file or of any worker file beside it. */
+function newestWriteInSession(sessionFile: string): number | null {
+  let newest: number | null = null;
+  const note = (path: string) => {
+    try {
+      const { mtimeMs } = statSync(path);
+      if (newest === null || mtimeMs > newest) newest = mtimeMs;
+    } catch { /* not there: it contributes nothing */ }
+  };
+  note(sessionFile);
+  // omp puts a session's subagent transcripts in a directory named after it.
+  const dir = sessionFile.replace(/\.jsonl$/, "");
   try {
-    return now - statSync(run.sessionFile).mtimeMs > SILENCE_MS;
-  } catch {
-    return true; // the session left nothing behind; there is nothing to wait for
-  }
+    for (const entry of readdirSync(dir)) {
+      if (entry.endsWith(".tombstone")) continue;
+      note(join(dir, entry));
+    }
+  } catch { /* no subagents ran */ }
+  return newest;
 }
 
 /** Is some other live process driving the loop? */

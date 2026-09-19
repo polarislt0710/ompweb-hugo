@@ -290,14 +290,10 @@ cmd_auto() {
       rm -f "$AUTO_PID"
       ;;
     status)
-      if [ -f "$AUTO_PID" ] && kill -0 "$(cat "$AUTO_PID")" 2>/dev/null; then
-        echo "running (pid $(cat "$AUTO_PID"))"
-      else
-        echo "not running"
-      fi
-      [ -f "$AUTO_LOG" ] && tail -6 "$AUTO_LOG"
+      shift || true
+      "$ROOT/scripts/auto-status.sh" "$@"
       ;;
-    *) echo "usage: ompweb auto [start|stop|status]"; return 2 ;;
+    *) echo "usage: ompweb auto [start|stop|status [-w]]"; return 2 ;;
   esac
 }
 
