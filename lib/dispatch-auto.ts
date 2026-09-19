@@ -14,7 +14,7 @@
 // person. This loop never reruns a ticket, never edits the plan, and never
 // decides that a blocker does not matter.
 
-import { readFileSync, writeFileSync, renameSync, existsSync, statSync, readdirSync } from "fs";
+import { readFileSync, writeFileSync, renameSync, existsSync, statSync, readdirSync, mkdirSync, copyFileSync, unlinkSync } from "fs";
 import { join } from "path";
 import { getAgentDir } from "./omp/paths";
 import { startDispatch, loadDispatchStore, type DispatchRun } from "./dispatch";
@@ -63,6 +63,8 @@ export interface AutoState {
   maxLanes?: number;
   /** Every ticket the last batch handed out, across all of its lanes. */
   lastBatch?: string[];
+  /** The most finished tickets status.md has ever reported. It must never fall. */
+  doneHighWater?: number;
   stopReason?: AutoStopReason;
   /**
    * The process driving the loop. It used to run inside the web server, where a
@@ -295,6 +297,40 @@ export async function autoTick(): Promise<void> {
   return tick();
 }
 
+
+/**
+ * Keep the last few copies of status.md.
+ *
+ * status.md is the only record of which tickets passed, and on 2026-09-19 three
+ * foremen rewrote it at once and the last writer won: thirty-eight done tickets
+ * became four, and the loop started re-running finished work. The file was
+ * rebuilt from the tickets' receipts, which is slow and lossy. A copy taken
+ * before every dispatch makes that a one-line restore instead.
+ */
+export function backUpStatus(cwd: string, keep = 20): string | null {
+  const source = join(cwd, HANDOFF_DIR, "status.md");
+  if (!existsSync(source)) return null;
+  const dir = join(getAgentDir(), "ompweb-status-backups", cwd.replace(/[^\w.-]+/g, "-"));
+  mkdirSync(dir, { recursive: true });
+  const target = join(dir, `${new Date().toISOString().replace(/[:.]/g, "-")}.md`);
+  copyFileSync(source, target);
+  for (const stale of readdirSync(dir).sort().slice(0, -keep)) {
+    try { unlinkSync(join(dir, stale)); } catch { /* another process got there first */ }
+  }
+  return target;
+}
+
+/**
+ * Has status.md lost tickets it used to hold?
+ *
+ * A run can only ever add verdicts. If the file comes back knowing about fewer
+ * finished tickets than it did last tick, something overwrote it, and carrying
+ * on means re-dispatching work that has already passed.
+ */
+export function lostHistory(previousHighWater: number | undefined, doneNow: number): boolean {
+  return previousHighWater !== undefined && doneNow < previousHighWater;
+}
+
 async function tick(): Promise<void> {
   const state = readAutoState();
   if (state && hasLiveOwner(state)) {
@@ -360,6 +396,16 @@ async function tick(): Promise<void> {
     // Finished means status.md said done — not merely that a run took it.
     const satisfied = [...readCompletedTickets(state.cwd)].filter((id) => !abandoned.has(id));
 
+    // status.md may only ever learn more. Fewer means it was overwritten.
+    if (lostHistory(state.doneHighWater, satisfied.length)) {
+      stop(state, "error",
+        `status.md now reports ${satisfied.length} finished tickets, down from ${state.doneHighWater}. ` +
+        `Something overwrote it; a copy from before the last dispatch is in ompweb-status-backups. ` +
+        `Nothing was dispatched, so no finished work has been re-run.`);
+      return;
+    }
+    state.doneHighWater = Math.max(state.doneHighWater ?? 0, satisfied.length);
+
     const allowed = new Set((state.only ?? []).map((id) => id.toUpperCase()));
     const offLimits = allowed.size === 0
       ? []
@@ -384,6 +430,7 @@ async function tick(): Promise<void> {
     }
 
     // One lane until the shared status.md problem is solved; see splitIntoLanes.
+    backUpStatus(state.cwd);
     const lanes = splitIntoLanes(plan, next, state.maxLanes ?? 1);
     const runs = [];
     for (const lane of lanes) runs.push(await startDispatch(state.cwd, lane, "web"));
