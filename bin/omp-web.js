@@ -20,6 +20,22 @@ if (process.argv[2] === "ompweb-launchd" || process.argv[2] === "launchd") {
   process.exit(status ?? 1);
 }
 
+// `ompweb auto` — drive the overnight dispatch loop from its own process, so a
+// hot reload in this repository cannot silently stop an unattended run.
+if (process.argv[2] === "auto-loop") {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { join } = require("node:path");
+  const packageRoot = join(__dirname, "..");
+  import(join(packageRoot, "scripts/auto-dispatch.mjs"))
+    .then(({ runAutoDispatchLoop }) => runAutoDispatchLoop(packageRoot))
+    .then((code) => process.exit(code))
+    .catch((error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    });
+  return;
+}
+
 // `ompweb capture <target...>` — screenshots from a shell, so the agents that
 // execute a plan can do the "capture these pages" tickets the reviewer writes.
 if (process.argv[2] === "capture") {

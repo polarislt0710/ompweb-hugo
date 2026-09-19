@@ -14,10 +14,10 @@
 // person. This loop never reruns a ticket, never edits the plan, and never
 // decides that a blocker does not matter.
 
-import { readFileSync, writeFileSync, renameSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, renameSync, existsSync, statSync } from "fs";
 import { join } from "path";
 import { getAgentDir } from "./omp/paths";
-import { listDispatchState, startDispatch, dispatchRunState, loadDispatchStore } from "./dispatch";
+import { listDispatchState, startDispatch, loadDispatchStore, type DispatchRun } from "./dispatch";
 import { parsePlan, suggestDispatchBatch, DEFAULT_DISPATCH_BATCH, type ParsedPlan } from "./work-plan";
 import { HANDOFF_DIR } from "./handoff-paths";
 
@@ -56,6 +56,15 @@ export interface AutoState {
    */
   skipped: string[];
   stopReason?: AutoStopReason;
+  /**
+   * The process driving the loop. It used to run inside the web server, where a
+   * colleague saving a file hot-reloaded the module and silently took the timer
+   * with it — the run then sat still for twenty-five minutes. A standalone
+   * process claims the loop here, and the server stands down while it is alive.
+   */
+  owner?: { pid: number; startedAt: number };
+  /** Bumped every tick, so a dead owner is obvious. */
+  heartbeatAt?: number;
   log: AutoEntry[];
 }
 
@@ -163,18 +172,68 @@ function stop(state: AutoState, reason: AutoStopReason, text: string): void {
   if (timer) { clearInterval(timer); timer = null; }
 }
 
+/** A run is young enough that a foreman could not have reported yet. */
+const START_GRACE_MS = 4 * 60_000;
+/** How long a session file must be silent before its run counts as over. */
+const SILENCE_MS = 5 * 60_000;
+
+/**
+ * Has this run finished?
+ *
+ * Not `dispatchRunState`: that asks an in-process session registry, which a
+ * restarted server or a standalone loop does not share, so it calls every run
+ * ended. That is how T157-T160 were dispatched at 12:47 and written off as
+ * "missing from status.md" at 12:48, a minute later, before the foreman had
+ * written a word. The session's own file is the evidence both processes can see:
+ * an omp session appends to it as it works.
+ */
+export function runLooksFinished(run: Pick<DispatchRun, "startedAt" | "sessionFile">, now = Date.now()): boolean {
+  if (now - run.startedAt < START_GRACE_MS) return false;
+  if (!run.sessionFile) return true;
+  try {
+    return now - statSync(run.sessionFile).mtimeMs > SILENCE_MS;
+  } catch {
+    return true; // the session left nothing behind; there is nothing to wait for
+  }
+}
+
+/** Is some other live process driving the loop? */
+export function hasLiveOwner(state: AutoState | null): boolean {
+  const owner = state?.owner;
+  if (!owner || owner.pid === process.pid) return false;
+  try {
+    process.kill(owner.pid, 0);
+    return true;
+  } catch {
+    return false; // the owner is gone; whoever asks may take over
+  }
+}
+
+/** One pass of the loop. Exported so a standalone process can drive it. */
+export async function autoTick(): Promise<void> {
+  return tick();
+}
+
 async function tick(): Promise<void> {
   const state = readAutoState();
+  if (state && hasLiveOwner(state)) {
+    // Another process owns this run; do not dispatch behind its back.
+    if (timer) { clearInterval(timer); timer = null; }
+    return;
+  }
   if (!state?.running) {
     if (timer) { clearInterval(timer); timer = null; }
     return;
   }
 
+  state.heartbeatAt = Date.now();
+  writeAutoState(state);
+
   try {
     // Never start a second run while one is alive.
     const live = loadDispatchStore().runs
       .filter((run) => run.cwd === state.cwd)
-      .some((run) => dispatchRunState(run) !== "ended");
+      .some((run) => !runLooksFinished(run));
     if (live) return;
 
     const plan = readPlan(state.cwd);
@@ -282,10 +341,20 @@ export function stopAutoDispatch(): AutoState | null {
   return state;
 }
 
+/** Take the loop over: the previous owner is gone, or there never was one. */
+export function claimAutoLoop(): AutoState | null {
+  const state = readAutoState();
+  if (!state?.running || hasLiveOwner(state)) return null;
+  state.owner = { pid: process.pid, startedAt: Date.now() };
+  writeAutoState(state);
+  return state;
+}
+
 /** Re-arm the loop after a server restart, so a night's run survives one. */
 export function resumeAutoDispatch(): void {
   const state = readAutoState();
   if (!state?.running || timer) return;
+  if (hasLiveOwner(state)) return; // a standalone process is driving it
   timer = setInterval(() => { void tick(); }, CHECK_MS);
   timer.unref?.();
 }

@@ -240,7 +240,7 @@ cmd_open() {
 
 usage() {
   cat <<EOF
-Usage: ompweb [restart|start|stop|status|open|capture|serve|install-service|uninstall-service]
+Usage: ompweb [restart|start|stop|status|open|capture|auto|serve|install-service|uninstall-service]
 
   restart            Stop and start this fork on $URL (default)
   start              Start if needed, keep the existing process
@@ -248,6 +248,7 @@ Usage: ompweb [restart|start|stop|status|open|capture|serve|install-service|unin
   status             Local + public health
   open               Open $URL in the browser
   capture            Screenshot pages (signed in, when a session was saved)
+  auto               Overnight dispatch loop: start | stop | status
   serve              Foreground next-dev (used by launchd)
   install-service    Install login LaunchAgent
   uninstall-service  Remove login LaunchAgent
@@ -264,8 +265,45 @@ cmd_capture() {
   node "$ROOT/bin/omp-web.js" capture "$@"
 }
 
+# The overnight dispatch loop, detached from the dev server that hot-reloads.
+AUTO_LOG="$HOME/Library/Logs/ompweb/auto-dispatch.log"
+AUTO_PID="$HOME/.omp/agent/ompweb-auto-loop.pid"
+cmd_auto() {
+  case "${1:-status}" in
+    start)
+      if [ -f "$AUTO_PID" ] && kill -0 "$(cat "$AUTO_PID")" 2>/dev/null; then
+        echo "already running (pid $(cat "$AUTO_PID"))"; return 0
+      fi
+      mkdir -p "$(dirname "$AUTO_LOG")"
+      nohup node "$ROOT/bin/omp-web.js" auto-loop >>"$AUTO_LOG" 2>&1 &
+      echo $! > "$AUTO_PID"
+      sleep 2
+      echo "started (pid $(cat "$AUTO_PID")) · log $AUTO_LOG"
+      tail -3 "$AUTO_LOG"
+      ;;
+    stop)
+      if [ -f "$AUTO_PID" ] && kill -0 "$(cat "$AUTO_PID")" 2>/dev/null; then
+        kill "$(cat "$AUTO_PID")" && echo "stopped (pid $(cat "$AUTO_PID"))"
+      else
+        echo "not running"
+      fi
+      rm -f "$AUTO_PID"
+      ;;
+    status)
+      if [ -f "$AUTO_PID" ] && kill -0 "$(cat "$AUTO_PID")" 2>/dev/null; then
+        echo "running (pid $(cat "$AUTO_PID"))"
+      else
+        echo "not running"
+      fi
+      [ -f "$AUTO_LOG" ] && tail -6 "$AUTO_LOG"
+      ;;
+    *) echo "usage: ompweb auto [start|stop|status]"; return 2 ;;
+  esac
+}
+
 case "$cmd" in
   capture) shift; cmd_capture "$@" ;;
+  auto) shift; cmd_auto "$@" ;;
   serve) cmd_serve ;;
   install-service) cmd_install_service ;;
   uninstall-service) cmd_uninstall_service ;;
