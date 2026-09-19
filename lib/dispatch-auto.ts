@@ -18,7 +18,7 @@ import { readFileSync, writeFileSync, renameSync, existsSync, statSync, readdirS
 import { join } from "path";
 import { getAgentDir } from "./omp/paths";
 import { startDispatch, loadDispatchStore, type DispatchRun } from "./dispatch";
-import { parsePlan, suggestDispatchBatch, DEFAULT_DISPATCH_BATCH, type ParsedPlan } from "./work-plan";
+import { parsePlan, suggestDispatchBatch, splitIntoLanes, DEFAULT_DISPATCH_BATCH, type ParsedPlan } from "./work-plan";
 import { HANDOFF_DIR } from "./handoff-paths";
 
 export type AutoStopReason =
@@ -55,6 +55,14 @@ export interface AutoState {
    * disappears from a plan.
    */
   skipped: string[];
+  /**
+   * How many foremen may run side by side. One foreman works through its batch
+   * one ticket at a time, so a batch of four takes four tickets' worth of clock.
+   * Lanes only ever hold work that cannot touch the same file.
+   */
+  maxLanes?: number;
+  /** Every ticket the last batch handed out, across all of its lanes. */
+  lastBatch?: string[];
   stopReason?: AutoStopReason;
   /**
    * The process driving the loop. It used to run inside the web server, where a
@@ -317,17 +325,15 @@ async function tick(): Promise<void> {
 
     // What the last run actually achieved.
     const reported = readLatestStates(state.cwd);
-    const lastRun = loadDispatchStore().runs.filter((run) => run.cwd === state.cwd).at(-1);
-    if (lastRun) {
-      const bad = lastRun.ticketIds.filter((id) => {
-        const reportedState = reported.get(id);
-        return reportedState !== "done" && reportedState !== "skipped";
-      });
-      const skipped = lastRun.ticketIds.filter((id) => reported.get(id) === "skipped");
+    // The whole batch, not the last run: a batch may have gone out in several
+    // lanes at once, and judging only the last lane writes off the others.
+    const lastBatch = state.lastBatch ?? [];
+    if (lastBatch.length > 0) {
+      const skipped = lastBatch.filter((id) => reported.get(id) === "skipped");
       // Only an explicit verdict counts against a ticket. A ticket the table
       // never mentions is simply not done yet: it goes back in the queue, which
       // is how T111 was finally caught after a run claimed 12/12 with 11 rows.
-      const failed = lastRun.ticketIds.filter((id) => {
+      const failed = lastBatch.filter((id) => {
         const reportedState = reported.get(id);
         return reportedState === "blocked" || reportedState === "needs-decision";
       });
@@ -340,7 +346,7 @@ async function tick(): Promise<void> {
           state.abandoned.push({ id, reason: reported.get(id) ?? "not reported in status.md" });
         }
         if (newly.length > 0) {
-          note(state, `Left behind from ${lastRun.ticketIds[0]}–${lastRun.ticketIds.at(-1)}: ${newly.map((id) => `${id} (${reported.get(id) ?? "missing from status.md"})`).join(", ")}`);
+          note(state, `Left behind from ${lastBatch[0]}–${lastBatch.at(-1)}: ${newly.map((id) => `${id} (${reported.get(id) ?? "missing from status.md"})`).join(", ")}`);
         }
       }
       if (skipped.length > 0) note(state, `Skipped for now, will be offered again once their dependency lands: ${skipped.join(", ")}`);
@@ -377,15 +383,21 @@ async function tick(): Promise<void> {
       return;
     }
 
-    const run = await startDispatch(state.cwd, next, "web");
+    const lanes = splitIntoLanes(plan, next, state.maxLanes ?? 1);
+    const runs = [];
+    for (const lane of lanes) runs.push(await startDispatch(state.cwd, lane, "web"));
     state.batchesRun += 1;
-    note(state, `Batch ${state.batchesRun}: dispatched ${next[0]}–${next.at(-1)} (${next.length} tickets)${unreachable.size > 0 ? `, skipping ${unreachable.size} blocked by ${[...abandoned].join(", ")}` : ""}. Session ${run.sessionId}.`);
+    state.lastBatch = next;
+    const shape = lanes.length > 1
+      ? ` in ${lanes.length} lanes (${lanes.map((lane) => lane.join("+")).join(" | ")})`
+      : "";
+    note(state, `Batch ${state.batchesRun}: dispatched ${next[0]}–${next.at(-1)} (${next.length} tickets)${shape}${unreachable.size > 0 ? `, skipping ${unreachable.size} blocked by ${[...abandoned].join(", ")}` : ""}. Session ${runs.map((run) => run.sessionId).join(", ")}.`);
   } catch (error) {
     stop(state, "error", `Stopped: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
-export function startAutoDispatch(cwd: string, options: { maxBatches?: number; batchSize?: number; only?: readonly string[] } = {}): AutoState {
+export function startAutoDispatch(cwd: string, options: { maxBatches?: number; batchSize?: number; maxLanes?: number; only?: readonly string[] } = {}): AutoState {
   const state: AutoState = {
     cwd,
     running: true,
@@ -393,6 +405,7 @@ export function startAutoDispatch(cwd: string, options: { maxBatches?: number; b
     batchesRun: 0,
     maxBatches: options.maxBatches ?? 12,
     batchSize: options.batchSize ?? DEFAULT_DISPATCH_BATCH,
+    maxLanes: options.maxLanes ?? 1,
     only: [...(options.only ?? [])],
     abandoned: [],
     skipped: [],

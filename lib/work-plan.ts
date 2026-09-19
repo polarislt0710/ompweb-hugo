@@ -212,3 +212,68 @@ export function parsePlan(markdown: string): ParsedPlan {
 
   return { title, context: contextLines.join("\n").trim(), tickets, errors, warnings };
 }
+
+/**
+ * Split a batch into lanes that can run at the same time.
+ *
+ * One foreman takes its tickets one after another, so a batch of four is four
+ * tickets' worth of wall clock, not one. Several foremen at once fixes that, but
+ * only if no two of them can write the same file: three copies of T111 ran
+ * concurrently on 2026-09-19 and all three edited the same page, which is the
+ * failure this guards against.
+ *
+ * Tickets that share a path land in the same lane, where they run in order.
+ * Lanes are the connected components of "shares a file with", so two lanes can
+ * never touch the same path. Components are merged until there are at most
+ * `maxLanes` of them; merging only ever makes a lane more sequential, never less
+ * safe.
+ */
+export function splitIntoLanes(plan: ParsedPlan, ticketIds: readonly string[], maxLanes = 3): string[][] {
+  const wanted = ticketIds.map((id) => id.toUpperCase());
+  const tickets = plan.tickets.filter((t) => wanted.includes(t.id.toUpperCase()));
+  if (tickets.length === 0) return [];
+
+  // Union-find over "these two tickets could write the same path".
+  const parent = new Map<string, string>(tickets.map((t) => [t.id, t.id]));
+  const find = (id: string): string => {
+    let root = id;
+    while (parent.get(root) !== root) root = parent.get(root)!;
+    return root;
+  };
+  const union = (a: string, b: string) => { parent.set(find(a), find(b)); };
+  for (let i = 0; i < tickets.length; i++) {
+    for (let j = i + 1; j < tickets.length; j++) {
+      if (pathsCollide(tickets[i].files, tickets[j].files)) union(tickets[i].id, tickets[j].id);
+    }
+  }
+
+  const groups = new Map<string, string[]>();
+  for (const ticket of tickets) {
+    const root = find(ticket.id);
+    groups.set(root, [...(groups.get(root) ?? []), ticket.id]);
+  }
+  // Keep plan order inside a lane: a later ticket may expect an earlier one's work.
+  const lanes = [...groups.values()];
+  // Merging over the cap: always fold the smallest lane into the next smallest,
+  // so the batch finishes as early as its longest lane and no sooner.
+  while (lanes.length > Math.max(1, maxLanes)) {
+    lanes.sort((a, b) => a.length - b.length);
+    const smallest = lanes.shift()!;
+    lanes[0].push(...smallest);
+  }
+  lanes.sort((a, b) => b.length - a.length);
+  for (const lane of lanes) lane.sort((a, b) => wanted.indexOf(a.toUpperCase()) - wanted.indexOf(b.toUpperCase()));
+  return lanes;
+}
+
+/** Could these two file lists reach the same path? A listed directory owns everything under it. */
+function pathsCollide(a: readonly string[], b: readonly string[]): boolean {
+  const norm = (p: string) => p.replace(/^\.\//, "").replace(/\/+$/, "");
+  for (const left of a.map(norm)) {
+    for (const right of b.map(norm)) {
+      if (left === right) return true;
+      if (left.startsWith(right + "/") || right.startsWith(left + "/")) return true;
+    }
+  }
+  return false;
+}
