@@ -48,6 +48,13 @@ export interface AutoState {
   only: string[];
   /** Tickets this loop has given up on, and why. */
   abandoned: Array<{ id: string; reason: string }>;
+  /**
+   * Tickets a foreman skipped because something they needed had not landed.
+   * They are neither done nor failed: once the thing they waited for lands,
+   * they go back in the queue. Treating them as taken is how work silently
+   * disappears from a plan.
+   */
+  skipped: string[];
   stopReason?: AutoStopReason;
   log: AutoEntry[];
 }
@@ -185,8 +192,16 @@ async function tick(): Promise<void> {
         const reportedState = reported.get(id);
         return reportedState !== "done" && reportedState !== "skipped";
       });
-      if (bad.length > 0) {
-        const newly = bad.filter((id) => !state.abandoned.some((entry) => entry.id === id));
+      const skipped = lastRun.ticketIds.filter((id) => reported.get(id) === "skipped");
+      const failed = lastRun.ticketIds.filter((id) => {
+        const reportedState = reported.get(id);
+        return reportedState !== "done" && reportedState !== "skipped";
+      });
+      // Anything that ran and came back done is no longer waiting.
+      state.skipped = [...new Set([...(state.skipped ?? []), ...skipped])]
+        .filter((id) => reported.get(id) !== "done");
+      if (failed.length > 0) {
+        const newly = failed.filter((id) => !state.abandoned.some((entry) => entry.id === id));
         for (const id of newly) {
           state.abandoned.push({ id, reason: reported.get(id) ?? "not reported in status.md" });
         }
@@ -194,6 +209,7 @@ async function tick(): Promise<void> {
           note(state, `Left behind from ${lastRun.ticketIds[0]}–${lastRun.ticketIds.at(-1)}: ${newly.map((id) => `${id} (${reported.get(id) ?? "missing from status.md"})`).join(", ")}`);
         }
       }
+      if (skipped.length > 0) note(state, `Skipped for now, will be offered again once their dependency lands: ${skipped.join(", ")}`);
     }
 
     // Rule 2: a ticket that needed something abandoned cannot run either.
@@ -201,7 +217,11 @@ async function tick(): Promise<void> {
     const unreachable = dependentsOf(plan, abandoned);
     // Dispatched-and-abandoned is not the same as done: a blocked ticket must
     // not release the work behind it.
-    const satisfied = dispatchedIds.filter((id) => !abandoned.has(id.toUpperCase()));
+    const waiting = new Set((state.skipped ?? []).map((id) => id.toUpperCase()));
+    const satisfied = dispatchedIds.filter((id) => {
+      const key = id.toUpperCase();
+      return !abandoned.has(key) && !waiting.has(key);
+    });
     const allowed = new Set((state.only ?? []).map((id) => id.toUpperCase()));
     const offLimits = allowed.size === 0
       ? []
@@ -243,6 +263,7 @@ export function startAutoDispatch(cwd: string, options: { maxBatches?: number; b
     batchSize: options.batchSize ?? DEFAULT_DISPATCH_BATCH,
     only: [...(options.only ?? [])],
     abandoned: [],
+    skipped: [],
     log: [],
   };
   writeAutoState(state);
