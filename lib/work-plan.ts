@@ -253,6 +253,19 @@ export function splitIntoLanes(plan: ParsedPlan, ticketIds: readonly string[], m
       if (pathsCollide(tickets[i].files, tickets[j].files)) union(tickets[i].id, tickets[j].id);
     }
   }
+  // A ticket must share a lane with any dependency dispatched alongside it.
+  // Splitting on file collisions alone sent T121 to one lane and the T120 it
+  // depends on to another on 2026-09-20; the foreman that got T121 could not
+  // see T120 finish, so it skipped the ticket and the slot was wasted. Lanes
+  // may run in any order relative to each other, so the only safe place for a
+  // dependency that is in this batch is the same lane.
+  const inBatch = new Set(tickets.map((t) => t.id.toUpperCase()));
+  for (const ticket of tickets) {
+    for (const dep of ticket.depends) {
+      const id = dep.toUpperCase();
+      if (inBatch.has(id)) union(ticket.id, id);
+    }
+  }
 
   const groups = new Map<string, string[]>();
   for (const ticket of tickets) {
