@@ -22,6 +22,16 @@ import { readLatestStates } from "../dispatch-auto";
 import { capturePages, readProjectImage, MAX_TARGETS, type CapturedImage } from "./screenshots";
 import { searchWeb, WebSearchError } from "./web-search";
 import {
+  applySandboxPatch,
+  discardSandbox,
+  openSandbox,
+  runInSandbox,
+  sandboxExists,
+  sandboxPath,
+  SandboxError,
+  SANDBOX_TIMEOUT_MS,
+} from "./sandbox";
+import {
   isSecretPath,
   listConnectorProjects,
   listVisibleFiles,
@@ -217,6 +227,58 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       additionalProperties: false,
     },
     annotations: readOnly,
+  },
+  {
+    name: "sandbox_open",
+    title: "Open a sandbox",
+    description: "Create a private git worktree off this project's HEAD that you may write in and run commands in. Your changes stay there: the project's own working tree is untouched, and nothing merges without the owner. One sandbox at a time — discard the old one first.",
+    inputSchema: { type: "object", properties: { project: projectProp }, required: ["project"], additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: "sandbox_diff",
+    title: "Sandbox diff",
+    description: "What you have changed in the sandbox, against the commit it was opened from. Show this to the owner; it is what they will judge.",
+    inputSchema: { type: "object", properties: { project: projectProp }, required: ["project"], additionalProperties: false },
+    annotations: readOnly,
+  },
+  {
+    name: "sandbox_discard",
+    title: "Discard the sandbox",
+    description: "Delete the sandbox worktree and its branch. Anything not already shown to the owner is lost.",
+    inputSchema: { type: "object", properties: { project: projectProp }, required: ["project"], additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: "apply_patch",
+    title: "Apply a patch in the sandbox",
+    description: "Apply a unified diff inside the sandbox. Paths that leave the sandbox, or that look like credentials, are refused. Open a sandbox first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project: projectProp,
+        patch: { type: "string", description: "A unified diff, as `git diff` prints it" },
+      },
+      required: ["project", "patch"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: "run_command",
+    title: "Run a command in the sandbox",
+    description: "Run one command inside the sandbox — tests, a linter, a build. It starts in the sandbox root, with its own HOME and an environment built from an allow-list, so no credential this server holds is visible to it. Commands that reach a remote are refused. Five minute ceiling.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project: projectProp,
+        command: { type: "string", description: "Command name, e.g. pytest" },
+        args: { type: "array", items: { type: "string" }, description: "Arguments" },
+      },
+      required: ["project", "command"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
   {
     name: "view_image",
@@ -541,6 +603,41 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
       return ok(`${HANDOFF_DIR}/${planName} — ${rows.length} ticket(s) (${summary})\n\n${body.join("\n")}`);
     }
 
+    case "sandbox_open": {
+      const info = await openSandbox(project);
+      return ok(`Sandbox open at ${info.path}\nBranch ${info.branch} from ${info.base.slice(0, 12)}\n\nWrite with apply_patch, run tests with run_command, show your work with sandbox_diff. The project's own tree is untouched and nothing merges without the owner.`);
+    }
+
+    case "sandbox_diff": {
+      if (!sandboxExists(project)) return fail("No sandbox is open. Use sandbox_open.");
+      const out = await runGit({ ...project, path: sandboxPath(project) }, ["diff", "HEAD"]);
+      const untracked = await runGit({ ...project, path: sandboxPath(project) }, ["ls-files", "--others", "--exclude-standard"]);
+      const extra = untracked.trim() ? `\n\nNew files:\n${untracked.trim()}` : "";
+      return ok(out.trim() ? out + extra : `No changes yet.${extra}`);
+    }
+
+    case "sandbox_discard": {
+      const { removed, changedFiles } = await discardSandbox(project);
+      if (!removed) return ok("No sandbox was open.");
+      return ok(`Sandbox removed.${changedFiles > 0 ? ` ${changedFiles} changed file(s) were discarded.` : ""}`);
+    }
+
+    case "apply_patch": {
+      const patch = typeof args.patch === "string" ? args.patch : "";
+      const result = await applySandboxPatch(project, patch);
+      return ok(`Applied to ${result.files.length} file(s): ${result.files.join(", ")}${result.output ? `\n${result.output}` : ""}`);
+    }
+
+    case "run_command": {
+      const command = str(args, "command") ?? "";
+      const argv = Array.isArray(args.args) ? args.args.filter((a): a is string => typeof a === "string") : [];
+      const result = await runInSandbox(project, command, argv);
+      const head = result.timedOut
+        ? `${result.command} — timed out after ${Math.round(SANDBOX_TIMEOUT_MS / 1000)}s`
+        : `${result.command} — exit ${result.exitCode}`;
+      return ok(`${head}\n\n${result.output || "(no output)"}${result.truncated ? "\n… output truncated" : ""}`);
+    }
+
     case "view_image":
       return images([await readProjectImage(project, args.path)], "Image");
 
@@ -652,7 +749,7 @@ export async function callMcpTool(name: string, rawArgs: unknown): Promise<McpTo
     if (!MCP_TOOLS.some((tool) => tool.name === name)) return fail(`Unknown tool: ${name}`);
     return await handleTool(name, args);
   } catch (error) {
-    if (error instanceof ProjectAccessError || error instanceof DispatchError || error instanceof HandoffError || error instanceof WebSearchError) {
+    if (error instanceof ProjectAccessError || error instanceof DispatchError || error instanceof HandoffError || error instanceof WebSearchError || error instanceof SandboxError) {
       return fail(error.message);
     }
     return fail(`Tool failed: ${error instanceof Error ? error.message : String(error)}`);
