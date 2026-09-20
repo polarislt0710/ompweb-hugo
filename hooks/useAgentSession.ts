@@ -2331,6 +2331,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           if (!ownerGone) {
             await ensureEventsConnected(sid);
             void refreshSubagentRoster(sid);
+            await registerHostTools(sid);
+            await registerHostUriSchemes(sid);
           }
           await sendAgentCommand(sid, {
             type: "prompt",
@@ -2345,8 +2347,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         await sendAgentCommand(session.id, { type: "get_state" });
         await ensureEventsConnected(session.id);
         void refreshSubagentRoster(session.id);
-        void registerHostTools(session.id);
-        void registerHostUriSchemes(session.id);
+        // Register before the prompt so set_host_tools cannot sit in omp's
+        // serial RPC queue ahead of the prompt ack (that race used to trip
+        // the 30s prompt timeout and recycle a live session).
+        await registerHostTools(session.id);
+        await registerHostUriSchemes(session.id);
         await sendAgentCommand(session.id, {
           type: "prompt",
           message,
@@ -2358,7 +2363,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
       return true;
     } catch (e) {
-      console.error("Failed to send message:", e);
+      // Log the message only: `console.error(Error)` in Next.js dev opens the
+      // overlay even when this catch already recovered (notice + input restore).
+      console.error("Failed to send message:", e instanceof Error ? e.message : String(e));
       // Every failure here (stream connect, startup, set_model, or the prompt
       // POST itself) means the prompt never started, so roll back the optimistic bubble.
       const optimisticKey = optimisticUserMessageKeyRef.current;

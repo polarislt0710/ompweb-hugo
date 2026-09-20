@@ -57,11 +57,14 @@ import {
   type SlashCommandSource,
 } from "./ChatInput-slash-commands";
 import {
+  COMPOSER_HIDDEN_MODELS_STORAGE_KEY,
+  COMPOSER_MODELS_CHANGE_EVENT,
   COMPOSER_MODELS_STORAGE_KEY,
   compareModelOptions,
   filterModelOptions,
   formatTokenCount,
-  readVisibleModelKeys,
+  migrateVisibleModelKeys,
+  readHiddenModelKeys,
   type ModelOption,
 } from "./ChatInput-model-options";
 import { ModelPickerPanel } from "./ChatInput-model-picker";
@@ -1459,25 +1462,33 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
   }, [slashActiveIndex, slashMenuOpen]);
 
   // Build model options: prefer modelList (has provider info), fallback to modelNames
-  const [visibleModelKeys, setVisibleModelKeys] = useState<Set<string> | null>(null);
+  const [hiddenModelKeys, setHiddenModelKeys] = useState<Set<string>>(() => new Set());
   useEffect(() => {
-    const refresh = () => setVisibleModelKeys(readVisibleModelKeys());
+    const refresh = () => setHiddenModelKeys(readHiddenModelKeys());
     const refreshFromStorage = (event: StorageEvent) => {
-      if (event.key === null || event.key === COMPOSER_MODELS_STORAGE_KEY) refresh();
+      if (event.key === null || event.key === COMPOSER_HIDDEN_MODELS_STORAGE_KEY || event.key === COMPOSER_MODELS_STORAGE_KEY) refresh();
     };
     refresh();
-    window.addEventListener("omp-composer-models-change", refresh);
+    window.addEventListener(COMPOSER_MODELS_CHANGE_EVENT, refresh);
     window.addEventListener("storage", refreshFromStorage);
     return () => {
-      window.removeEventListener("omp-composer-models-change", refresh);
+      window.removeEventListener(COMPOSER_MODELS_CHANGE_EVENT, refresh);
       window.removeEventListener("storage", refreshFromStorage);
     };
   }, []);
 
+  // The legacy allowlist can only be converted once the runtime knows every
+  // model, otherwise models omp reports later would be filed as hidden.
+  useEffect(() => {
+    if (!modelList || modelList.length === 0) return;
+    const migrated = migrateVisibleModelKeys(modelList.map((m) => `${m.provider}:${m.id}`));
+    if (migrated) setHiddenModelKeys(migrated);
+  }, [modelList]);
+
   const modelOptions: ModelOption[] = React.useMemo(() => {
     if (modelList && modelList.length > 0) {
       return modelList.map((m) => ({ provider: m.provider, modelId: m.id, name: m.name }))
-        .filter((m) => visibleModelKeys === null || visibleModelKeys.has(`${m.provider}:${m.modelId}`))
+        .filter((m) => !hiddenModelKeys.has(`${m.provider}:${m.modelId}`))
         .sort((a, b) => compareModelOptions(modelCollator, a, b));
     }
     return Object.entries(modelNames ?? {}).map(([modelId, name]) => ({
@@ -1485,7 +1496,7 @@ export const ChatInput = memo(forwardRef<ChatInputHandle, Props>(function ChatIn
       modelId,
       name,
     })).sort((a, b) => compareModelOptions(modelCollator, a, b));
-  }, [modelList, modelNames, model?.provider, visibleModelKeys, modelCollator]);
+  }, [modelList, modelNames, model?.provider, hiddenModelKeys, modelCollator]);
 
   const filteredModelOptions = React.useMemo(
     () => filterModelOptions(modelOptions, modelSearchQuery, locale),
