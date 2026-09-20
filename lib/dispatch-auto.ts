@@ -15,6 +15,7 @@
 // decides that a blocker does not matter.
 
 import { readFileSync, writeFileSync, renameSync, existsSync, statSync, readdirSync, mkdirSync, copyFileSync, unlinkSync } from "fs";
+import { execFileSync } from "child_process";
 import { join } from "path";
 import { getAgentDir } from "./omp/paths";
 import { startDispatch, loadDispatchStore, type DispatchRun } from "./dispatch";
@@ -255,7 +256,10 @@ function stop(state: AutoState, reason: AutoStopReason, text: string): void {
 /** A run is young enough that a foreman could not have reported yet. */
 const START_GRACE_MS = 4 * 60_000;
 /** How long a session file must be silent before its run counts as over. */
-const SILENCE_MS = 5 * 60_000;
+// A worker can be legitimately quiet for a long model turn or a long command
+// with no output; eleven minutes was observed. The process check above is the
+// real guard, so this only has to catch a run whose process is already gone.
+const SILENCE_MS = 15 * 60_000;
 
 /**
  * Has this run finished?
@@ -301,6 +305,27 @@ function newestWriteInSession(sessionFile: string): number | null {
     }
   } catch { /* no subagents ran */ }
   return newest;
+}
+
+
+/**
+ * Is a foreman still running for this project?
+ *
+ * File mtimes were the only signal, and a worker may legitimately go quiet for
+ * longer than the silence window: one model turn or one long test command with
+ * no output. On 2026-09-20 T16 said nothing for eleven minutes, the loop called
+ * the run dead, and a second foreman was dispatched onto the same four tickets —
+ * two agents editing the same files, which is the failure this whole loop exists
+ * to avoid. A live process is not a guess.
+ */
+export function hasLiveForeman(cwd: string): boolean {
+  try {
+    const out = execFileSync("ps", ["-Ao", "command="], { encoding: "utf8", timeout: 5000 });
+    return out.split("\n").some((line) =>
+      line.includes("--mode rpc-ui") && line.includes(`--cwd ${cwd}`));
+  } catch {
+    return false; // if ps cannot be read, fall back to the file evidence
+  }
 }
 
 /** Is some other live process driving the loop? */
@@ -371,6 +396,9 @@ async function tick(): Promise<void> {
 
   try {
     // Never start a second run while one is alive.
+    // A foreman process for this project means a run is alive, whatever the
+    // files say. Check it first: it is the one signal that cannot be wrong.
+    if (hasLiveForeman(state.cwd)) return;
     const live = loadDispatchStore().runs
       .filter((run) => run.cwd === state.cwd)
       .some((run) => !runLooksFinished(run));

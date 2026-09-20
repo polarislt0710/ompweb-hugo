@@ -28,7 +28,7 @@ Rules:
    - A worker reports that verify failed only because of another ticket in this plan: treat the ticket as done, note it in status.md, and re-run that verify after the other ticket lands.
    - A ticket needs a decision the plan does not make: mark it \`needs-decision\` with the exact question. Do not guess and do not use the ask tool; nobody is watching this run.
 5. Do not commit, push, or edit files outside the ticket's scope unless the ticket says so.
-6. Keep @${HANDOFF_DIR}/status.md current after every ticket finishes. Write it in the plan's language, with this shape:
+6. Write @${HANDOFF_DIR}/status.md the moment a ticket finishes, before you start the next one. Not at the end of the batch — the moment each one lands. A foreman on 2026-09-20 held four verdicts in its head for ninety-eight minutes, ran out of budget before writing any of them, and the whole batch was dispatched again from scratch. The work costs what it costs; recording it is the last and cheapest step, so take it first. Write it in the plan's language, with this shape:
 
 ## Run <ISO date/time>
 | Ticket | State | Files changed | Verify |
