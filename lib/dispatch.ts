@@ -111,7 +111,12 @@ export function validateDispatch(plan: ParsedPlan, ticketIds: readonly string[] 
   return selected;
 }
 
-export async function startDispatch(cwd: string, ticketIds: readonly string[] | undefined, source: DispatchSource): Promise<DispatchRun> {
+/**
+ * @param statusFile Where this run records its verdicts, relative to
+ * HANDOFF_DIR. Defaults to the shared status.md, which is right for a single
+ * run started by hand; the auto loop gives every concurrent lane its own file.
+ */
+export async function startDispatch(cwd: string, ticketIds: readonly string[] | undefined, source: DispatchSource, statusFile?: string): Promise<DispatchRun> {
   const { plan } = readProjectPlan(cwd);
   const selected = validateDispatch(plan, ticketIds);
 
@@ -119,7 +124,7 @@ export async function startDispatch(cwd: string, ticketIds: readonly string[] | 
   allowFileRoot(cwd);
   invalidateSessionListCache();
   try {
-    await session.send({ type: "prompt", message: buildForemanPrompt(plan, selected) });
+    await session.send({ type: "prompt", message: buildForemanPrompt(plan, selected, statusFile) });
   } catch (error) {
     await session.destroyAndWait();
     throw error;

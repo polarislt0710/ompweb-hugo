@@ -16,11 +16,11 @@
 
 import { readFileSync, writeFileSync, renameSync, existsSync, statSync, readdirSync, mkdirSync, copyFileSync, unlinkSync } from "fs";
 import { execFileSync } from "child_process";
-import { join } from "path";
+import { join, sep, basename } from "path";
 import { getAgentDir } from "./omp/paths";
 import { startDispatch, loadDispatchStore, type DispatchRun } from "./dispatch";
 import { parsePlan, suggestDispatchBatch, splitIntoLanes, DEFAULT_DISPATCH_BATCH, type ParsedPlan } from "./work-plan";
-import { HANDOFF_DIR } from "./handoff-paths";
+import { HANDOFF_DIR, STATUS_DIR } from "./handoff-paths";
 
 export type AutoStopReason =
   | "finished"
@@ -139,10 +139,34 @@ export type TicketState = "done" | "blocked" | "skipped" | "needs-decision" | "r
  * dispatched" says yes for a ticket that was dispatched and skipped, and for one
  * whose session was killed — both of which then release the work behind them.
  */
+/**
+ * Every file that carries run verdicts, newest first.
+ *
+ * A run writes only its own file in `status.d/`, so "what is finished" is the
+ * union of all of them plus status.md, which holds every run from before the
+ * split. Newest first matters for the readers that want the latest word on a
+ * ticket: a later run's verdict must win over an earlier one.
+ */
+export function statusSources(cwd: string): string[] {
+  const base = join(cwd, HANDOFF_DIR);
+  const shared = join(base, "status.md");
+  const dir = join(base, STATUS_DIR);
+  const lanes: { path: string; at: number }[] = [];
+  if (existsSync(dir)) {
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith(".md")) continue;
+      const path = join(dir, name);
+      try { lanes.push({ path, at: statSync(path).mtimeMs }); } catch { /* vanished mid-read */ }
+    }
+  }
+  lanes.sort((a, b) => b.at - a.at);
+  // status.md last: it is the oldest record, so anything in status.d/ outranks it.
+  return [...lanes.map((lane) => lane.path), ...(existsSync(shared) ? [shared] : [])];
+}
+
 export function readCompletedTickets(cwd: string): Set<string> {
-  const path = join(cwd, HANDOFF_DIR, "status.md");
   const done = new Set<string>();
-  if (!existsSync(path)) return done;
+  for (const path of statusSources(cwd)) {
   for (const line of readFileSync(path, "utf8").split("\n")) {
     // A foreman writes its verdict in the state cell, not only the word:
     // "done（round-5 verdict FAIL）" is a finished reviewer ticket. Requiring the
@@ -150,6 +174,7 @@ export function readCompletedTickets(cwd: string): Set<string> {
     // eight times over ninety minutes, each round reaching the same conclusion.
     const row = /^\|\s*(T\d+)\s*\|\s*done\b/i.exec(line.trim());
     if (row) done.add(row[1].toUpperCase());
+  }
   }
   return done;
 }
@@ -163,9 +188,8 @@ export function readCompletedTickets(cwd: string): Set<string> {
  * T161/T163 as failures the tick after they both passed.
  */
 export function readLatestStates(cwd: string): Map<string, TicketState> {
-  const path = join(cwd, HANDOFF_DIR, "status.md");
   const states = new Map<string, TicketState>();
-  if (!existsSync(path)) return states;
+  for (const path of statusSources(cwd)) {
   for (const line of readFileSync(path, "utf8").split("\n")) {
     // The state cell carries the foreman's own words after the verdict —
     // "needs-decision（誠實停在基建停止點）" — so do not demand the closing pipe
@@ -184,13 +208,17 @@ export function readLatestStates(cwd: string): Map<string, TicketState> {
       : word === "running" ? "running"
       : "unknown");
   }
+  }
   return states;
 }
 
 export function readRunStates(cwd: string): Map<string, TicketState> {
-  const path = join(cwd, HANDOFF_DIR, "status.md");
   const states = new Map<string, TicketState>();
-  if (!existsSync(path)) return states;
+  // The newest run is in the newest file that has one. With lanes there is no
+  // single "last section" any more, so take the first source that reports a run
+  // at all; statusSources already put the freshest first.
+  const path = statusSources(cwd).find((candidate) => /^## Run/m.test(readFileSync(candidate, "utf8")));
+  if (!path) return states;
   const text = readFileSync(path, "utf8");
   // Anchored to the start of a line, because status.md may open with the run
   // heading rather than a title.
@@ -356,13 +384,25 @@ export async function autoTick(): Promise<void> {
  * before every dispatch makes that a one-line restore instead.
  */
 export function backUpStatus(cwd: string, keep = 20): string | null {
-  const source = join(cwd, HANDOFF_DIR, "status.md");
-  if (!existsSync(source)) return null;
+  const sources = statusSources(cwd);
+  if (sources.length === 0) return null;
   const dir = join(getAgentDir(), "ompweb-status-backups", cwd.replace(/[^\w.-]+/g, "-"));
   mkdirSync(dir, { recursive: true });
-  const target = join(dir, `${new Date().toISOString().replace(/[:.]/g, "-")}.md`);
-  copyFileSync(source, target);
-  for (const stale of readdirSync(dir).sort().slice(0, -keep)) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  // One backup per file: a lane's verdicts are as irreplaceable as status.md's,
+  // and copying only the shared file would have left the newest work unprotected.
+  let target: string | null = null;
+  for (const source of sources) {
+    const name = source.endsWith(`${sep}status.md`) ? `${stamp}.md` : `${stamp}__${basename(source)}`;
+    const copy = join(dir, name);
+    copyFileSync(source, copy);
+    target ??= copy;
+  }
+  // keep is a number of snapshots, not files, so count distinct timestamps.
+  const stamps = [...new Set(readdirSync(dir).map((name) => name.slice(0, stamp.length)))].sort();
+  const doomed = new Set(stamps.slice(0, -keep));
+  for (const stale of readdirSync(dir)) {
+    if (!doomed.has(stale.slice(0, stamp.length))) continue;
     try { unlinkSync(join(dir, stale)); } catch { /* another process got there first */ }
   }
   return target;
@@ -493,13 +533,20 @@ async function tick(): Promise<void> {
       return;
     }
 
-    // One lane until the shared status.md problem is solved; see splitIntoLanes.
     backUpStatus(state.cwd);
     // A forced ticket is owed exactly one run, not a standing exemption.
     if (state.force?.length) state.force = state.force.filter((id) => !next.some((n) => n.toUpperCase() === id.toUpperCase()));
     const lanes = splitIntoLanes(plan, next, state.maxLanes ?? 1);
+    // Every lane writes its own file, so two running at once cannot overwrite
+    // each other. The name carries the batch and the lane's first ticket so a
+    // person reading status.d/ can tell which run left which verdicts.
+    mkdirSync(join(state.cwd, HANDOFF_DIR, STATUS_DIR), { recursive: true });
+    const batchNo = state.batchesRun + 1;
     const runs = [];
-    for (const lane of lanes) runs.push(await startDispatch(state.cwd, lane, "web"));
+    for (const [index, lane] of lanes.entries()) {
+      const statusFile = `${STATUS_DIR}/batch-${String(batchNo).padStart(3, "0")}-${lane[0]?.toLowerCase() ?? `lane${index + 1}`}.md`;
+      runs.push(await startDispatch(state.cwd, lane, "web", statusFile));
+    }
     state.batchesRun += 1;
     state.lastBatch = next;
     const shape = lanes.length > 1
