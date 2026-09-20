@@ -149,7 +149,41 @@ export async function openSandbox(project: ConnectorProject): Promise<SandboxInf
 
   const base = (await runGit(project, ["rev-parse", "HEAD"])).trim();
   const branch = `sandbox/${slug(project.name)}/${new Date().toISOString().replace(/[:.]/g, "-")}`;
-  await runGit(project, ["worktree", "add", "-b", branch, dir, base]);
+  // A project under iCloud Drive hands back EDEADLK ("mmap failed: Resource
+  // deadlock avoided") when the daemon is rehydrating a file git wants to read.
+  // It is transient, so retry; and turn off the caches that make git mmap the
+  // index in the first place.
+  const addArgs = [
+    "-c", "core.fsmonitor=false",
+    "-c", "core.untrackedCache=false",
+    "-c", "index.threads=1",
+    "worktree", "add", "-b", branch, dir, base,
+  ];
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await runGit(project, addArgs);
+      lastError = undefined;
+      break;
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/deadlock|mmap|EDEADLK|Resource temporarily/i.test(message)) break;
+      await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
+      // A half-made worktree would block the retry.
+      await runGit(project, ["worktree", "prune"]).catch(() => undefined);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  if (lastError) {
+    const message = lastError instanceof Error ? lastError.message : String(lastError);
+    if (/deadlock|mmap|EDEADLK/i.test(message)) {
+      throw new SandboxError("icloud_deadlock",
+        "git could not read the project: macOS returned EDEADLK, which happens while iCloud Drive rehydrates a file. " +
+        "Three attempts failed. Ask the owner to turn off \"Optimise Mac Storage\" for this folder, or to move the repository off iCloud Drive.");
+    }
+    throw lastError;
+  }
   if (existsSync(join(dir, ".env"))) {
     // Should be impossible — .env is gitignored — but never ship the assumption.
     rmSync(join(dir, ".env"), { force: true });

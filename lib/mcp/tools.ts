@@ -346,9 +346,9 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         project: projectProp,
         plan_markdown: { type: "string", description: "The whole plan in the required format" },
         decisions_markdown: { type: "string", description: "Optional: key decisions and why, replaces decisions.md" },
-        plan_file: { type: "string", description: "Write to .omp/handoff/<name>.md instead of plan.md. Use this when another line of work already owns plan.md — a ticket there is pinned by its own hash, and rewriting the file invalidates the evidence of every run in flight." },
+        plan_file: { type: "string", description: "Which file under .omp/handoff/ to write, e.g. plan-math-physics.md. Required, and plan.md is refused. Use this when another line of work already owns plan.md — a ticket there is pinned by its own hash, and rewriting the file invalidates the evidence of every run in flight." },
       },
-      required: ["project", "plan_markdown"],
+      required: ["project", "plan_markdown", "plan_file"],
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: true },
@@ -362,6 +362,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       properties: {
         project: projectProp,
         ticket_ids: { type: "array", items: { type: "string" }, description: "e.g. [\"T1\", \"T2\"]" },
+        plan_file: { type: "string", description: "Dispatch from .omp/handoff/<name>.md — the plan you wrote with write_plan. Omit only to dispatch the owner's plan.md." },
         note: { type: "string", description: "One or two lines for the owner, shown with the approval request" },
       },
       required: ["project"],
@@ -589,7 +590,11 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
       const planPath = join(project.path, HANDOFF_DIR, planName);
       if (!existsSync(planPath)) return fail(`No such plan: ${HANDOFF_DIR}/${planName}`);
       const plan = parsePlan(readFileSync(planPath, "utf8"));
-      const states = readLatestStates(project.path);
+      // status.md records the owner's own line of work. Ticket numbers are not
+      // unique across plans, so reading it for a side plan reports another
+      // plan's T1 as this one's: show no verdicts rather than wrong ones.
+      const isMainPlan = planName === "plan.md";
+      const states = isMainPlan ? readLatestStates(project.path) : new Map<string, string>();
       const wanted = str(args, "state");
       const rows = plan.tickets
         .map((ticket) => ({ ticket, state: states.get(ticket.id.toUpperCase()) ?? "pending" }))
@@ -597,10 +602,12 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
       if (rows.length === 0) return ok(wanted ? `No tickets with state ${wanted}.` : "No tickets.");
       const body = rows.map(({ ticket, state }) =>
         `${ticket.id}  ${state}  agent=${ticket.agent || "worker"}  depends=${ticket.depends.join(",") || "none"}  ${ticket.title ?? ""}`.trimEnd());
+      const note = isMainPlan ? "" :
+        `\n\n(States come from ${HANDOFF_DIR}/status.md, which belongs to plan.md. This is a different plan, so every ticket reads "pending" — its own runs are reported by get_runs.)`;
       const counts = new Map<string, number>();
       for (const row of rows) counts.set(row.state, (counts.get(row.state) ?? 0) + 1);
       const summary = [...counts.entries()].map(([k, v]) => `${k}: ${v}`).join(", ");
-      return ok(`${HANDOFF_DIR}/${planName} — ${rows.length} ticket(s) (${summary})\n\n${body.join("\n")}`);
+      return ok(`${HANDOFF_DIR}/${planName} — ${rows.length} ticket(s) (${summary})\n\n${body.join("\n")}${note}`);
     }
 
     case "sandbox_open": {
@@ -690,7 +697,17 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
       }
       const insideProject = (realDir: string) => realDir === project.path || realDir.startsWith(project.path + sep);
       const planFile = str(args, "plan_file");
-      if (planFile) {
+      if (!planFile) {
+        // The default used to overwrite plan.md. An outside reviewer probed
+        // exactly that on 2026-09-20 and replaced 135 tickets with one. There is
+        // no safe default here: say which file, every time.
+        return fail(
+          "plan_file is required. plan.md belongs to the owner's line of work and cannot be written through this connector — " +
+          "each ticket in it is pinned by the sha256 of its own text, so replacing the file discards the evidence of every run in flight. " +
+          "Write your own: plan_file: \"plan-<topic>.md\".",
+        );
+      }
+      {
         // A second author must not land in plan.md. Each ticket there is pinned
         // by the sha256 of its own text, so rewriting the file while runs are in
         // flight throws away the evidence those runs are building.
@@ -706,15 +723,20 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
         writeFileSync(target, markdown, "utf8");
         return ok(`Saved ${HANDOFF_DIR}/${planFile}: ${plan.tickets.length} tickets (${plan.tickets.map((ticket) => ticket.id).join(", ")}).${plan.warnings.length ? `\nWarnings:\n- ${plan.warnings.join("\n- ")}` : ""}\nThis file is yours; plan.md was not touched. Dispatch from it with request_dispatch.`);
       }
-      writeHandoffFile(project.path, "plan.md", markdown, insideProject);
-      if (typeof args.decisions_markdown === "string" && args.decisions_markdown.trim()) {
-        writeHandoffFile(project.path, "decisions.md", args.decisions_markdown, insideProject);
-      }
-      return ok(`Saved .omp/handoff/plan.md: ${plan.tickets.length} tickets (${plan.tickets.map((ticket) => ticket.id).join(", ")}).${plan.warnings.length ? `\nWarnings:\n- ${plan.warnings.join("\n- ")}` : ""}\nNext: request_dispatch.`);
     }
 
     case "request_dispatch": {
       const ticketIds = Array.isArray(args.ticket_ids) ? args.ticket_ids.filter((id): id is string => typeof id === "string") : undefined;
+      const dispatchPlan = str(args, "plan_file");
+      if (dispatchPlan) {
+        // Dispatching a side plan needs the foreman to read that file. Until it
+        // can, say so plainly rather than quietly running the owner's plan.md,
+        // which is what an omitted plan_file would have done.
+        return fail(
+          `Dispatching from ${HANDOFF_DIR}/${dispatchPlan} is not wired up yet: the foreman reads plan.md. ` +
+          `Your plan is saved — ask the owner to dispatch it, or to merge the tickets into plan.md when the main run is idle.`,
+        );
+      }
       const note = str(args, "note") ?? "";
       if (directDispatch()) {
         const run = await startDispatch(project.path, ticketIds, "chatgpt");
