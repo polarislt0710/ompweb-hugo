@@ -4,7 +4,7 @@
 // Starting or steering a run needs approval in OMP Web unless the owner set
 // OMP_WEB_MCP_DIRECT_DISPATCH=1.
 
-import { existsSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, realpathSync } from "fs";
 import { join, sep } from "path";
 import {
   createDispatchRequest,
@@ -15,9 +15,10 @@ import {
   readProjectPlan,
   startDispatch,
 } from "../dispatch";
-import { HandoffError, readHandoffFiles, writeHandoffFile } from "../handoff";
+import { HandoffError, readHandoffFiles, writeHandoffFile, HANDOFF_DIR } from "../handoff";
 import { getSessionUsageBreakdown } from "../session-usage";
 import { parsePlan, PLAN_FORMAT_GUIDE } from "../work-plan";
+import { readLatestStates } from "../dispatch-auto";
 import { capturePages, readProjectImage, MAX_TARGETS, type CapturedImage } from "./screenshots";
 import { searchWeb, WebSearchError } from "./web-search";
 import {
@@ -159,6 +160,65 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     annotations: readOnly,
   },
   {
+    name: "git_status",
+    title: "Git status",
+    description: "Which branch this project is on, what is staged, modified or untracked, and how far ahead or behind the upstream. Use it to tell whether a ticket's work has actually landed in the tree yet.",
+    inputSchema: {
+      type: "object",
+      properties: { project: projectProp },
+      required: ["project"],
+      additionalProperties: false,
+    },
+    annotations: readOnly,
+  },
+  {
+    name: "git_log",
+    title: "Git log",
+    description: "Recent commits: hash, author, date and subject. Use it to see what has been committed since a ticket ran.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project: projectProp,
+        limit: { type: "integer", description: "How many commits (default 20, max 100)" },
+        path: { type: "string", description: "Only commits touching this file or directory" },
+      },
+      required: ["project"],
+      additionalProperties: false,
+    },
+    annotations: readOnly,
+  },
+  {
+    name: "read_artifact",
+    title: "Read a run artifact",
+    description: "Read a file under artifacts/ — a receipt, a test log, a capture manifest. This is where workers put the evidence for what they did, so read it before believing a ticket passed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project: projectProp,
+        path: { type: "string", description: "Path under artifacts/, e.g. artifacts/edsight-r05/receipts/T159.json" },
+      },
+      required: ["project", "path"],
+      additionalProperties: false,
+    },
+    annotations: readOnly,
+  },
+  {
+    name: "list_tickets",
+    title: "List tickets",
+    description: "Every ticket in a plan with its agent, dependencies and the verdict status.md last recorded for it. Use it to see what is done, what is waiting and what is blocked without reading the whole plan.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project: projectProp,
+        plan_file: { type: "string", description: "Plan file under .omp/handoff/ (default plan.md)" },
+        state: { type: "string", description: "Only tickets with this verdict: done, blocked, needs-decision, skipped, running, or pending for ones status.md has not mentioned" },
+      },
+      required: ["project"],
+      additionalProperties: false,
+    },
+    annotations: readOnly,
+  },
+  {
     name: "view_image",
     title: "View an image",
     description: "Look at an image already in the project: a design mockup, an exported screen, a saved screenshot. PNG, JPG, GIF, WebP or AVIF, up to 4 MB.",
@@ -224,6 +284,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         project: projectProp,
         plan_markdown: { type: "string", description: "The whole plan in the required format" },
         decisions_markdown: { type: "string", description: "Optional: key decisions and why, replaces decisions.md" },
+        plan_file: { type: "string", description: "Write to .omp/handoff/<name>.md instead of plan.md. Use this when another line of work already owns plan.md — a ticket there is pinned by its own hash, and rewriting the file invalidates the evidence of every run in flight." },
       },
       required: ["project", "plan_markdown"],
       additionalProperties: false,
@@ -426,6 +487,60 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
     case "git_diff":
       return ok(await gitDiff(project, str(args, "base"), safeRelDir(str(args, "path"))));
 
+    case "git_status": {
+      const branch = (await runGit(project, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+      const porcelain = await runGit(project, ["status", "--porcelain=v1", "--branch"]);
+      const lines = porcelain.split("\n").filter(Boolean);
+      const header = lines.find((line) => line.startsWith("##")) ?? `## ${branch}`;
+      // A worker's own .env or key must not surface here just because git saw it.
+      const changes = lines.filter((line) => !line.startsWith("##"))
+        .filter((line) => !isSecretPath(line.slice(3).split(" -> ").at(-1) ?? ""));
+      const hidden = lines.filter((line) => !line.startsWith("##")).length - changes.length;
+      const body = changes.length === 0 ? "Working tree clean." : changes.slice(0, 200).join("\n");
+      return ok(`Branch: ${branch}\n${header}\n\n${body}` +
+        (changes.length > 200 ? `\n… ${changes.length - 200} more` : "") +
+        (hidden > 0 ? `\n(${hidden} path(s) withheld as secrets)` : ""));
+    }
+
+    case "git_log": {
+      const raw = typeof args.limit === "number" ? args.limit : 20;
+      const limit = Math.min(100, Math.max(1, Math.floor(raw)));
+      const path = safeRelDir(str(args, "path"));
+      const gitArgs = ["log", `-${limit}`, "--date=short", "--format=%h  %ad  %an  %s"];
+      if (path) gitArgs.push("--", path);
+      const out = (await runGit(project, gitArgs)).trim();
+      return ok(out || "No commits.");
+    }
+
+    case "read_artifact": {
+      const rel = str(args, "path") ?? "";
+      if (!rel.startsWith("artifacts/")) return fail("read_artifact only reads paths under artifacts/. Use read_file for source.");
+      const file = await readProjectFile(project, rel);
+      return ok(file.text);
+    }
+
+    case "list_tickets": {
+      const planName = str(args, "plan_file") ?? "plan.md";
+      if (planName.includes("/") || planName.includes("\\") || !planName.endsWith(".md")) {
+        return fail("plan_file must be a .md file directly under .omp/handoff/");
+      }
+      const planPath = join(project.path, HANDOFF_DIR, planName);
+      if (!existsSync(planPath)) return fail(`No such plan: ${HANDOFF_DIR}/${planName}`);
+      const plan = parsePlan(readFileSync(planPath, "utf8"));
+      const states = readLatestStates(project.path);
+      const wanted = str(args, "state");
+      const rows = plan.tickets
+        .map((ticket) => ({ ticket, state: states.get(ticket.id.toUpperCase()) ?? "pending" }))
+        .filter((row) => !wanted || row.state === wanted);
+      if (rows.length === 0) return ok(wanted ? `No tickets with state ${wanted}.` : "No tickets.");
+      const body = rows.map(({ ticket, state }) =>
+        `${ticket.id}  ${state}  agent=${ticket.agent || "worker"}  depends=${ticket.depends.join(",") || "none"}  ${ticket.title ?? ""}`.trimEnd());
+      const counts = new Map<string, number>();
+      for (const row of rows) counts.set(row.state, (counts.get(row.state) ?? 0) + 1);
+      const summary = [...counts.entries()].map(([k, v]) => `${k}: ${v}`).join(", ");
+      return ok(`${HANDOFF_DIR}/${planName} — ${rows.length} ticket(s) (${summary})\n\n${body.join("\n")}`);
+    }
+
     case "view_image":
       return images([await readProjectImage(project, args.path)], "Image");
 
@@ -477,6 +592,23 @@ async function handleTool(name: string, args: Record<string, unknown>): Promise<
         return fail(`Plan not saved. Fix these errors:\n- ${plan.errors.join("\n- ")}\n\n${PLAN_FORMAT_GUIDE}`);
       }
       const insideProject = (realDir: string) => realDir === project.path || realDir.startsWith(project.path + sep);
+      const planFile = str(args, "plan_file");
+      if (planFile) {
+        // A second author must not land in plan.md. Each ticket there is pinned
+        // by the sha256 of its own text, so rewriting the file while runs are in
+        // flight throws away the evidence those runs are building.
+        if (planFile.includes("/") || planFile.includes("\\") || !planFile.endsWith(".md")) {
+          return fail("plan_file must be a .md file directly under .omp/handoff/, e.g. plan-math-physics.md");
+        }
+        if (planFile === "plan.md" || planFile === "status.md" || planFile === "decisions.md") {
+          return fail(`${planFile} belongs to the main line of work. Choose another name, e.g. plan-<topic>.md`);
+        }
+        const target = join(project.path, HANDOFF_DIR, planFile);
+        const real = realpathSync(join(project.path, HANDOFF_DIR));
+        if (!insideProject(real)) return fail("Handoff directory is outside the project");
+        writeFileSync(target, markdown, "utf8");
+        return ok(`Saved ${HANDOFF_DIR}/${planFile}: ${plan.tickets.length} tickets (${plan.tickets.map((ticket) => ticket.id).join(", ")}).${plan.warnings.length ? `\nWarnings:\n- ${plan.warnings.join("\n- ")}` : ""}\nThis file is yours; plan.md was not touched. Dispatch from it with request_dispatch.`);
+      }
       writeHandoffFile(project.path, "plan.md", markdown, insideProject);
       if (typeof args.decisions_markdown === "string" && args.decisions_markdown.trim()) {
         writeHandoffFile(project.path, "decisions.md", args.decisions_markdown, insideProject);

@@ -196,6 +196,13 @@ export function registerClient(body: unknown): OAuthClient {
   }
   const rejected = redirectUris.filter((uri) => !isAllowedRedirectUri(uri));
   if (rejected.length > 0) {
+    // The client only shows the user "invalid redirect URI", so without this the
+    // owner cannot tell which host to allow. Log every rejected URI and the
+    // list it was checked against.
+    console.warn(
+      `[mcp/oauth] register rejected: ${rejected.join(", ")} — allowed hosts: ${allowedRedirectHosts().join(", ")}. ` +
+      `Add a host with OMP_WEB_MCP_REDIRECT_HOSTS.`,
+    );
     throw new OAuthError("invalid_redirect_uri", `Redirect URI not allowed: ${rejected[0]}`);
   }
   const method = record.token_endpoint_auth_method;
